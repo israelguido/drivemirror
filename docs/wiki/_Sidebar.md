@@ -1,5 +1,7 @@
 **DriveMirror**
 
+**🇧🇷 Português**
+
 - [[Início|Home]]
 - [[Instalação|Instalacao]]
 - [[Configurar o Google Drive|Configurar-Google-Drive]]
@@ -7,8 +9,26 @@
 - [[Perguntas frequentes|Perguntas-frequentes]]
 - [[Solução de problemas|Solucao-de-problemas]]
 
+**🇺🇸 English**
+
+- [[Home|Home-EN]]
+- [[Installation|Installation]]
+- [[Set up Google Drive|Set-up-Google-Drive]]
+- [[Daily use|Daily-use]]
+- [[FAQ|FAQ]]
+- [[Troubleshooting|Troubleshooting]]
+
+**🇪🇸 Español**
+
+- [[Inicio|Inicio]]
+- [[Instalación|Instalacion]]
+- [[Configuración de Google Drive|Configuracion-de-Google-Drive]]
+- [[Uso cotidiano|Uso-cotidiano]]
+- [[Preguntas frecuentes|Preguntas-frecuentes]]
+- [[Solución de problemas|Solucion-de-problemas]]
+
 ---
 
-[Repositório](https://github.com/israelguido/drivemirror) ·
-[Pacotes](https://github.com/israelguido/drivemirror/tree/main/releases) ·
-[Segurança](https://github.com/israelguido/drivemirror/blob/main/SECURITY.md)
+[Repositório / Repository / Repositorio](https://github.com/israelguido/drivemirror) ·
+[Releases](https://github.com/israelguido/drivemirror/tree/main/releases) ·
+[Security](https://github.com/israelguido/drivemirror/blob/main/SECURITY.md)

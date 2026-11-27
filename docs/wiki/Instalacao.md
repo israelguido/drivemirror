@@ -1,3 +1,5 @@
+🇧🇷 [[Português|Instalacao]] · 🇺🇸 [[English|Installation]] · 🇪🇸 [[Español|Instalacion]]
+
 # Instalação
 
 O DriveMirror 0.3.0 tem pacotes para dois sistemas, publicados na pasta

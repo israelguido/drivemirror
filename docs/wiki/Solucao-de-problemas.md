@@ -1,3 +1,5 @@
+🇧🇷 [[Português|Solucao-de-problemas]] · 🇺🇸 [[English|Troubleshooting]] · 🇪🇸 [[Español|Solucion-de-problemas]]
+
 # Solução de problemas
 
 ### "O remote "gdrive" não existe no rclone. Crie-o na aba Contas rclone."

@@ -1,3 +1,5 @@
+🇧🇷 [[Português|Uso-diario]] · 🇺🇸 [[English|Daily-use]] · 🇪🇸 [[Español|Uso-cotidiano]]
+
 # Uso diário
 
 ## Configurar o que sincronizar

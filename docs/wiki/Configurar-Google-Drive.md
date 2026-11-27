@@ -1,3 +1,5 @@
+🇧🇷 [[Português|Configurar-Google-Drive]] · 🇺🇸 [[English|Set-up-Google-Drive]] · 🇪🇸 [[Español|Configuracion-de-Google-Drive]]
+
 # Configurar o Google Drive
 
 O DriveMirror usa o rclone para falar com o Google Drive. O rclone precisa de um

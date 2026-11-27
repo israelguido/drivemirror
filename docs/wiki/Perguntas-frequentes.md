@@ -1,3 +1,5 @@
+🇧🇷 [[Português|Perguntas-frequentes]] · 🇺🇸 [[English|FAQ]] · 🇪🇸 [[Español|Preguntas-frecuentes]]
+
 # Perguntas frequentes
 
 ### É um backup?

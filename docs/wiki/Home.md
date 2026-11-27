@@ -1,3 +1,5 @@
+🇧🇷 [[Português|Home]] · 🇺🇸 [[English|Home-EN]] · 🇪🇸 [[Español|Inicio]]
+
 # DriveMirror
 
 O DriveMirror é um app pequeno para Linux que mantém uma **cópia espelhada de
