@@ -259,3 +259,18 @@ fn validation_errors_use_the_configured_language() {
         tr(Language::PtBr, Message::RemoteRootNotAllowed)
     );
 }
+
+#[test]
+fn config_shares_the_account_remote_name_rules() {
+    let source = tempfile::tempdir().unwrap();
+    let mut config = Config {
+        local_folder: source.path().to_path_buf(),
+        remote: "-v".into(),
+        remote_folder: "Backup".into(),
+        ..Default::default()
+    };
+    assert!(config.validate().is_err());
+    config.remote = "my+drive@home".into();
+    assert!(drivemirror::accounts::validate_remote_name(&config.remote).is_ok());
+    assert!(config.validate().is_ok());
+}

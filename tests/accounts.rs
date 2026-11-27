@@ -154,15 +154,31 @@ fn create_drive_rejects_invalid_input() {
     }
 }
 
-#[test]
-fn continue_arguments_stay_literal() {
-    let tricky = r#"a b "c" 'd'; rm -rf ~ $(x) -flag"#;
-    let request = ContinueRequest {
+fn question(state: &str, is_password: bool) -> ConfigQuestion {
+    ConfigQuestion::parse(&format!(
+        r#"{{"State": {state:?}, "Option": {{"Name": "x", "IsPassword": {is_password}, "Default": "{SECRET}"}}, "Error": "", "Result": "{SECRET}"}}"#
+    ))
+    .unwrap()
+}
+
+fn creation() -> CreateDriveRequest {
+    CreateDriveRequest {
         name: "gdrive".into(),
-        state: tricky.into(),
-        result: tricky.into(),
-        secret: false,
-    };
+        client_id: "id.apps".into(),
+        client_secret: SECRET.into(),
+    }
+}
+
+#[test]
+fn continue_arguments_stay_literal_and_repeat_creation_values() {
+    let tricky = r#"a b "c" 'd'; rm -rf ~ $(x) -flag"#;
+    let request = ContinueRequest::answer(
+        "gdrive",
+        Some(&creation()),
+        &question(tricky, false),
+        tricky,
+    )
+    .unwrap();
     let command = request.command().unwrap();
     assert_eq!(command.program, "rclone");
     assert_eq!(
@@ -171,6 +187,12 @@ fn continue_arguments_stay_literal() {
             "config",
             "update",
             "gdrive",
+            "client_id",
+            "id.apps",
+            "client_secret",
+            SECRET,
+            "scope",
+            "drive",
             "--continue",
             "--state",
             tricky,
@@ -179,20 +201,53 @@ fn continue_arguments_stay_literal() {
             "--non-interactive",
         ]
     );
+    let debug = format!("{request:?} {command:?}");
+    assert!(!debug.contains(SECRET), "{debug}");
+    assert!(debug.contains("rm -rf ~ $(x) -flag"));
 }
 
 #[test]
-fn password_continuation_is_redacted_in_debug() {
-    let request = ContinueRequest {
-        name: "gdrive".into(),
-        state: "*pass".into(),
-        result: SECRET.into(),
-        secret: true,
-    };
-    assert!(!format!("{request:?}").contains(SECRET));
+fn reconnect_continuation_has_no_creation_values() {
+    let request = ContinueRequest::answer("gdrive", None, &question("*s", false), "true").unwrap();
+    assert_eq!(
+        request.command().unwrap().args,
+        [
+            "config",
+            "update",
+            "gdrive",
+            "--continue",
+            "--state",
+            "*s",
+            "--result",
+            "true",
+            "--non-interactive"
+        ]
+    );
+}
+
+#[test]
+fn password_answers_are_redacted_from_the_question() {
+    let password = question("*pass", true);
+    let debug = format!("{password:?}");
+    assert!(!debug.contains(SECRET), "{debug}");
+    let request = ContinueRequest::answer("gdrive", None, &password, SECRET).unwrap();
     let command = request.command().unwrap();
     assert_eq!(command.args[7], SECRET);
-    assert!(!format!("{command:?}").contains(SECRET));
+    assert!(!format!("{request:?} {command:?}").contains(SECRET));
+}
+
+#[test]
+fn answers_need_a_pending_question_and_matching_creation() {
+    assert!(ContinueRequest::answer("gdrive", None, &question("", false), "x").is_err());
+    assert!(
+        ContinueRequest::answer("other", Some(&creation()), &question("*s", false), "x").is_err()
+    );
+    assert!(ContinueRequest::answer("-bad", None, &question("*s", false), "x").is_err());
+}
+
+#[test]
+fn parse_requires_state() {
+    assert!(ConfigQuestion::parse("{}").is_err());
 }
 
 #[test]
@@ -224,11 +279,4 @@ fn remote_names_follow_rclone_charset() {
         assert!(reconnect_command(bad).is_err());
         assert!(delete_command(bad).is_err());
     }
-    let request = ContinueRequest {
-        name: "-bad".into(),
-        state: String::new(),
-        result: String::new(),
-        secret: false,
-    };
-    assert!(request.command().is_err());
 }
