@@ -2,9 +2,9 @@
 //! Wayland it is a layer surface under the top bar; elsewhere a small window.
 
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
     rc::Rc,
-    time::{Duration, Instant},
+    time::Duration,
 };
 
 use drivemirror::{
@@ -22,8 +22,9 @@ pub(crate) struct Panel {
     state: gtk::Label,
     last: gtk::Label,
     route: gtk::Label,
-    /// When focus loss closed the panel; the tray click causing it must not reopen it.
-    auto_hidden_at: Cell<Option<Instant>>,
+    /// The pointer entered since the panel opened; only then does leaving close it.
+    entered: Cell<bool>,
+    close_timer: RefCell<Option<glib::SourceId>>,
 }
 
 pub(crate) fn build(
@@ -58,7 +59,8 @@ pub(crate) fn build(
             .wrap(true)
             .wrap_mode(gtk::pango::WrapMode::WordChar)
             .build(),
-        auto_hidden_at: Cell::new(None),
+        entered: Cell::new(false),
+        close_timer: RefCell::default(),
     });
 
     let root = gtk::Box::new(gtk::Orientation::Vertical, 8);
@@ -123,17 +125,41 @@ pub(crate) fn build(
         glib::Propagation::Stop
     });
     if layer {
-        // A click outside moves keyboard focus away from the layer surface.
-        window.connect_is_active_notify(glib::clone!(
+        // Not focus loss: Hyprland's focus-follows-mouse deactivates the panel while
+        // the pointer travels from the tray to it. Close after the pointer leaves.
+        let motion = gtk::EventControllerMotion::new();
+        motion.connect_enter(glib::clone!(
             #[weak]
             panel,
-            move |window| {
-                if !window.is_active() && window.is_visible() {
-                    panel.auto_hidden_at.set(Some(Instant::now()));
-                    window.set_visible(false);
-                }
+            move |_, _, _| {
+                panel.entered.set(true);
+                panel.cancel_close();
             }
         ));
+        motion.connect_leave(glib::clone!(
+            #[weak]
+            panel,
+            move |_| {
+                if !panel.entered.get() {
+                    return;
+                }
+                panel.cancel_close();
+                let id = glib::timeout_add_local_once(
+                    Duration::from_millis(700),
+                    glib::clone!(
+                        #[weak]
+                        panel,
+                        move || {
+                            // Fired: forget the id so it is never removed twice.
+                            panel.close_timer.take();
+                            panel.window.set_visible(false);
+                        }
+                    ),
+                );
+                panel.close_timer.replace(Some(id));
+            }
+        ));
+        window.add_controller(motion);
     }
     panel
 }
@@ -143,19 +169,21 @@ impl Panel {
         self.window.is_visible()
     }
 
+    fn cancel_close(&self) {
+        if let Some(id) = self.close_timer.take() {
+            id.remove();
+        }
+    }
+
     /// Opens or closes the panel; returns true when it was opened.
     pub(crate) fn toggle(&self) -> bool {
         if self.window.is_visible() {
             self.window.set_visible(false);
             return false;
         }
-        if self
-            .auto_hidden_at
-            .take()
-            .is_some_and(|at| at.elapsed() < Duration::from_millis(800))
-        {
-            return false;
-        }
+        // A fresh opening stays until the pointer has entered and left again.
+        self.cancel_close();
+        self.entered.set(false);
         self.window.present();
         true
     }
