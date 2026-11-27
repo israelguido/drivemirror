@@ -2,7 +2,7 @@
 
 use std::{
     fmt,
-    io::Read,
+    io::{BufRead, BufReader, Read},
     process::{Child, Command, Stdio},
     sync::{
         Arc, Mutex,
@@ -37,6 +37,7 @@ pub struct AccountRunner {
     cancelled: Arc<AtomicBool>,
     child: Arc<Mutex<Option<Child>>>,
     result: Arc<Mutex<Option<AccountResult>>>,
+    auth_url: Arc<Mutex<Option<String>>>,
 }
 
 impl fmt::Debug for AccountRunner {
@@ -67,6 +68,12 @@ impl AccountRunner {
         self.result.lock().ok()?.take()
     }
 
+    /// The OAuth URL rclone printed while it is still running (redacted), so the
+    /// user can open it when the browser did not.
+    pub fn auth_url(&self) -> Option<String> {
+        self.auth_url.lock().ok()?.clone()
+    }
+
     /// Kills the running rclone, e.g. while it waits for browser authorization.
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::Release);
@@ -89,6 +96,9 @@ impl AccountRunner {
         let runner = self.clone();
         std::thread::spawn(move || {
             let completed = runner.run(&command, language);
+            if let Ok(mut url) = runner.auth_url.lock() {
+                *url = None;
+            }
             if let Ok(mut value) = runner.result.lock() {
                 *value = Some(completed);
             }
@@ -132,7 +142,19 @@ impl AccountRunner {
             }
         }
         // stderr on its own thread so neither pipe can fill up and block rclone.
-        let stderr = std::thread::spawn(move || read_all(stderr));
+        let auth_url = self.auth_url.clone();
+        let stderr_secrets: Vec<String> = secrets.iter().map(|secret| secret.to_string()).collect();
+        let stderr = std::thread::spawn(move || {
+            let secrets: Vec<&str> = stderr_secrets.iter().map(String::as_str).collect();
+            read_lines(stderr, |line| {
+                if let Some(url) = find_url(line)
+                    && let Ok(mut current) = auth_url.lock()
+                    && !current.as_deref().is_some_and(is_local)
+                {
+                    *current = Some(redact(url, &secrets));
+                }
+            })
+        });
         let stdout = read_all(stdout);
         let stderr = stderr.join().unwrap_or_default();
         let status = self
@@ -158,4 +180,29 @@ fn read_all(pipe: Option<impl Read>) -> String {
         let _ = pipe.read_to_string(&mut text);
     }
     text
+}
+
+/// Reads every line as it arrives, calling `on_line` before the process exits.
+fn read_lines(pipe: Option<impl Read>, mut on_line: impl FnMut(&str)) -> String {
+    let mut text = String::new();
+    if let Some(pipe) = pipe {
+        for line in BufReader::new(pipe).lines().map_while(Result::ok) {
+            on_line(&line);
+            text.push_str(&line);
+            text.push('\n');
+        }
+    }
+    text
+}
+
+fn is_local(url: &str) -> bool {
+    url.starts_with("http://127.0.0.1")
+}
+
+/// rclone's local OAuth URL wins over other https links (e.g. documentation).
+fn find_url(line: &str) -> Option<&str> {
+    let start = line
+        .find("http://127.0.0.1")
+        .or_else(|| line.find("https://"))?;
+    line[start..].split_whitespace().next()
 }

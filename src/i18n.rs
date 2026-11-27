@@ -139,6 +139,7 @@ pub enum Message {
     MissingCredentials,
     RemoteExists,
     RemoveIncomplete,
+    OpenAuthLink,
 }
 
 /// Placeholders `{error}`, `{program}` and `{name}` are filled by callers with `str::replace`.
@@ -412,6 +413,11 @@ pub fn tr(language: Language, message: Message) -> &'static str {
             "Remover remote incompleto {name}",
             "Remove incomplete remote {name}",
             "Eliminar remoto incompleto {name}",
+        ],
+        OpenAuthLink => [
+            "Abrir link de autorização",
+            "Open authorization link",
+            "Abrir enlace de autorización",
         ],
     };
     match language {

@@ -13,6 +13,9 @@ case "$*" in
   *--continue*--result\ true*) printf '{"State":"","Result":"done"}' ;;
   *failing*) echo "error: bad credentials for $*" >&2; exit 1 ;;
   *slow*) exec sleep 30 ;;
+  *authwait*) echo "NOTICE: see https://rclone.org/drive/ for help" >&2
+     echo "Please go to http://127.0.0.1:53682/auth?state=$8 to log in" >&2
+     sleep 1 ;;
   *) echo "creating with $*" >&2
      printf '{"State":"*oauth,1","Option":{"Name":"config_is_local","Help":"Use web browser? %s","Default":true,"Examples":[{"Value":"true","Help":"Yes"}],"Type":"bool"}}' "$*" ;;
 esac
@@ -111,6 +114,27 @@ fn account_process_lifecycle_with_fake_rclone() {
     );
     runner.cancel();
     assert!(matches!(wait(&runner), AccountResult::Cancelled));
+
+    // The OAuth URL arrives while rclone still waits, redacted, preferring the local one.
+    runner
+        .start(create("authwait", &program), Language::En)
+        .unwrap();
+    let mut url = None;
+    for _ in 0..80 {
+        url = runner.auth_url();
+        if url.as_deref().is_some_and(|url| url.contains("127.0.0.1")) {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    assert!(runner.is_running(), "URL must arrive before rclone exits");
+    assert_eq!(
+        url.as_deref(),
+        Some("http://127.0.0.1:53682/auth?state=<redacted>")
+    );
+    let result = wait(&runner);
+    assert_no_secret(&result);
+    assert_eq!(runner.auth_url(), None);
 
     // Missing rclone is actionable.
     let missing = fake(create("gdrive", &program), Path::new("missing-rclone-test"));

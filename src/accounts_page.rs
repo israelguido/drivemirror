@@ -54,6 +54,7 @@ struct Page {
     progress: gtk::Box,
     spinner: gtk::Spinner,
     progress_label: gtk::Label,
+    auth_link: gtk::LinkButton,
     remove_incomplete: gtk::Button,
     status: gtk::Label,
 }
@@ -85,6 +86,7 @@ pub(crate) fn build(ui: &Rc<Ui>, window: &gtk::Window) -> gtk::Box {
         progress: gtk::Box::new(gtk::Orientation::Horizontal, 8),
         spinner: gtk::Spinner::new(),
         progress_label: gtk::Label::new(None),
+        auth_link: gtk::LinkButton::new(CLIENT_ID_HELP),
         remove_incomplete: gtk::Button::new(),
         status: gtk::Label::builder().wrap(true).xalign(0.0).build(),
     });
@@ -163,6 +165,9 @@ pub(crate) fn build(ui: &Rc<Ui>, window: &gtk::Window) -> gtk::Box {
     let cancel = translated_button(ui, Message::Cancel);
     page.progress.append(&page.spinner);
     page.progress.append(&page.progress_label);
+    page.auth_link.set_visible(false);
+    crate::app::register(ui, &page.auth_link, Message::OpenAuthLink);
+    page.progress.append(&page.auth_link);
     page.progress.append(&cancel);
     root.append(&page.progress);
     root.append(&page.status);
@@ -228,6 +233,15 @@ pub(crate) fn build(ui: &Rc<Ui>, window: &gtk::Window) -> gtk::Box {
             #[strong]
             page,
             move || {
+                // rclone prints the OAuth URL while waiting; offer it in case no browser opened.
+                let url = page.runner.auth_url();
+                page.auth_link.set_visible(url.is_some());
+                if let Some(url) = url
+                    && page.auth_link.uri() != url
+                {
+                    page.auth_link.set_uri(&url);
+                    page.auth_link.set_tooltip_text(Some(&url));
+                }
                 if let Some(result) = page.runner.take_result() {
                     finish(&page, result);
                 }
