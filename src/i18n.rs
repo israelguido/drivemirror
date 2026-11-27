@@ -110,9 +110,38 @@ pub enum Message {
     AlreadyRunning,
     ProgramNotFound,
     StartFailed,
+    SyncTab,
+    AccountsTab,
+    ConfiguredRemotes,
+    Refresh,
+    NoRemotes,
+    NewDriveRemote,
+    RemoteNameLabel,
+    ClientIdLabel,
+    ClientSecretLabel,
+    CreateRemote,
+    ClientIdHelp,
+    Reconnect,
+    Remove,
+    ConfirmRemoveTitle,
+    ConfirmRemoveBody,
+    ContinueSetup,
+    CancelSetup,
+    Options,
+    RunningRclone,
+    WaitingBrowser,
+    OperationCancelled,
+    RemoteReady,
+    RemoteRemoved,
+    RcloneFailed,
+    MalformedResponse,
+    InvalidRemoteName,
+    MissingCredentials,
+    RemoteExists,
+    RemoveIncomplete,
 }
 
-/// Placeholders `{error}` and `{program}` are filled by callers with `str::replace`.
+/// Placeholders `{error}`, `{program}` and `{name}` are filled by callers with `str::replace`.
 /// `System` is translated as English; resolve it first.
 pub fn tr(language: Language, message: Message) -> &'static str {
     use Language::{En, Es, PtBr, System};
@@ -282,6 +311,151 @@ pub fn tr(language: Language, message: Message) -> &'static str {
             "Não foi possível iniciar {program}: {error}",
             "Could not start {program}: {error}",
             "No se pudo iniciar {program}: {error}",
+        ],
+        SyncTab => [
+            "Sincronização",
+            "Sync",
+            "Sincronización",
+        ],
+        AccountsTab => [
+            "Contas rclone",
+            "Rclone accounts",
+            "Cuentas de rclone",
+        ],
+        ConfiguredRemotes => [
+            "Remotes configurados",
+            "Configured remotes",
+            "Remotos configurados",
+        ],
+        Refresh => [
+            "Atualizar",
+            "Refresh",
+            "Actualizar",
+        ],
+        NoRemotes => [
+            "Nenhum remote configurado.",
+            "No remotes configured.",
+            "No hay remotos configurados.",
+        ],
+        NewDriveRemote => [
+            "Novo remote Google Drive",
+            "New Google Drive remote",
+            "Nuevo remoto de Google Drive",
+        ],
+        RemoteNameLabel => [
+            "Nome do remote",
+            "Remote name",
+            "Nombre del remoto",
+        ],
+        ClientIdLabel => [
+            "Client ID",
+            "Client ID",
+            "Client ID",
+        ],
+        ClientSecretLabel => [
+            "Client Secret",
+            "Client Secret",
+            "Client Secret",
+        ],
+        CreateRemote => [
+            "Criar remote",
+            "Create remote",
+            "Crear remoto",
+        ],
+        ClientIdHelp => [
+            "Como criar seu próprio Client ID do Google",
+            "How to make your own Google Client ID",
+            "Cómo crear tu propio Client ID de Google",
+        ],
+        Reconnect => [
+            "Reconectar",
+            "Reconnect",
+            "Reconectar",
+        ],
+        Remove => [
+            "Remover",
+            "Remove",
+            "Eliminar",
+        ],
+        ConfirmRemoveTitle => [
+            "Remover o remote {name}?",
+            "Remove the remote {name}?",
+            "¿Eliminar el remoto {name}?",
+        ],
+        ConfirmRemoveBody => [
+            "Isso remove apenas a configuração do rclone neste computador. Nenhum arquivo do Google Drive é apagado.",
+            "This only removes the rclone configuration on this computer. No files on Google Drive are deleted.",
+            "Esto solo elimina la configuración de rclone en este equipo. No se borra ningún archivo de Google Drive.",
+        ],
+        ContinueSetup => [
+            "Continuar",
+            "Continue",
+            "Continuar",
+        ],
+        CancelSetup => [
+            "Cancelar configuração",
+            "Cancel setup",
+            "Cancelar configuración",
+        ],
+        Options => [
+            "Opções",
+            "Options",
+            "Opciones",
+        ],
+        RunningRclone => [
+            "Executando o rclone…",
+            "Running rclone…",
+            "Ejecutando rclone…",
+        ],
+        WaitingBrowser => [
+            "Aguardando autorização no navegador…",
+            "Waiting for authorization in the browser…",
+            "Esperando la autorización en el navegador…",
+        ],
+        OperationCancelled => [
+            "Operação cancelada. Você pode tentar de novo.",
+            "Operation cancelled. You can try again.",
+            "Operación cancelada. Puedes intentarlo de nuevo.",
+        ],
+        RemoteReady => [
+            "Remote {name} pronto para uso.",
+            "Remote {name} is ready.",
+            "El remoto {name} está listo.",
+        ],
+        RemoteRemoved => [
+            "Remote {name} removido do rclone.",
+            "Remote {name} removed from rclone.",
+            "Remoto {name} eliminado de rclone.",
+        ],
+        RcloneFailed => [
+            "O rclone falhou: {error}",
+            "Rclone failed: {error}",
+            "rclone falló: {error}",
+        ],
+        MalformedResponse => [
+            "Resposta inválida do rclone; tente novamente.",
+            "Invalid response from rclone; try again.",
+            "Respuesta no válida de rclone; inténtalo de nuevo.",
+        ],
+        InvalidRemoteName => [
+            "Nome de remote inválido: use letras, números, espaços internos e _ . + @ -",
+            "Invalid remote name: use letters, digits, inner spaces and _ . + @ -",
+            "Nombre de remoto no válido: usa letras, números, espacios internos y _ . + @ -",
+        ],
+        MissingCredentials => [
+            "Informe o Client ID e o Client Secret.",
+            "Enter the Client ID and Client Secret.",
+            "Introduce el Client ID y el Client Secret.",
+        ],
+        RemoteExists => [
+            "Já existe um remote chamado {name}.",
+            "A remote named {name} already exists.",
+            "Ya existe un remoto llamado {name}.",
+        ],
+        RemoveIncomplete => [
+            "Remover remote incompleto {name}",
+            "Remove incomplete remote {name}",
+            "Eliminar remoto incompleto {name}",
         ],
     };
     match language {

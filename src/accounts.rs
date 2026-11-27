@@ -24,6 +24,11 @@ impl AccountCommand {
             secret_index,
         }
     }
+
+    /// The secret argument, so a runner can redact it from rclone output.
+    pub fn secret(&self) -> Option<&str> {
+        self.args.get(self.secret_index?).map(String::as_str)
+    }
 }
 
 impl fmt::Debug for AccountCommand {
