@@ -47,13 +47,14 @@ impl fmt::Debug for AccountRunner {
     }
 }
 
-/// Replaces every occurrence of `secret` with `<redacted>`.
-pub fn redact(text: &str, secret: &str) -> String {
-    if secret.is_empty() {
-        text.into()
-    } else {
-        text.replace(secret, "<redacted>")
-    }
+/// Replaces every occurrence of each non-empty secret with `<redacted>`.
+pub fn redact(text: &str, secrets: &[&str]) -> String {
+    secrets
+        .iter()
+        .filter(|secret| !secret.is_empty())
+        .fold(text.into(), |text, secret| {
+            text.replace(secret, "<redacted>")
+        })
 }
 
 impl AccountRunner {
@@ -97,7 +98,7 @@ impl AccountRunner {
     }
 
     fn run(&self, command: &AccountCommand, language: Language) -> AccountResult {
-        let secret = command.secret().unwrap_or_default();
+        let secrets = command.secrets();
         let spawned = Command::new(&command.program)
             .args(&command.args)
             .stdin(Stdio::null())
@@ -116,7 +117,7 @@ impl AccountRunner {
                     &tr(language, Message::StartFailed)
                         .replace("{program}", &command.program)
                         .replace("{error}", &error.to_string()),
-                    secret,
+                    &secrets,
                 ));
             }
         };
@@ -145,8 +146,8 @@ impl AccountRunner {
         }
         AccountResult::Finished(AccountOutput {
             success: status.is_some_and(|status| status.success()),
-            stdout: redact(stdout.trim(), secret),
-            stderr: redact(stderr.trim(), secret),
+            stdout: redact(stdout.trim(), &secrets),
+            stderr: redact(stderr.trim(), &secrets),
         })
     }
 }

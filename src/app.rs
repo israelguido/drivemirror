@@ -17,9 +17,9 @@ use crate::{
     tray::{Action, DriveMirrorTray},
 };
 
-struct Ui {
+pub(crate) struct Ui {
     local: gtk::Entry,
-    remote: gtk::Entry,
+    pub(crate) remote: gtk::Entry,
     remote_folder: gtk::Entry,
     interval: gtk::SpinButton,
     excludes: gtk::TextView,
@@ -27,7 +27,7 @@ struct Ui {
     status: gtk::Label,
     sync: gtk::Button,
     language: gtk::DropDown,
-    translated: RefCell<Vec<(gtk::Widget, Message)>>,
+    translated: RefCell<Vec<(glib::WeakRef<gtk::Widget>, Message)>>,
     refreshing: Cell<bool>,
     tray: Option<ksni::blocking::Handle<DriveMirrorTray>>,
 }
@@ -83,6 +83,8 @@ pub fn activate(
     subtitle.add_css_class("dim-label");
     root.append(&title);
     root.append(&subtitle);
+    let sync_page = gtk::Box::new(gtk::Orientation::Vertical, 14);
+    sync_page.set_margin_top(12);
     let grid = gtk::Grid::builder()
         .row_spacing(10)
         .column_spacing(10)
@@ -94,9 +96,9 @@ pub fn activate(
     add_row(&grid, 2, &ui, Message::RemoteFolderLabel, &ui.remote_folder);
     add_row(&grid, 3, &ui, Message::IntervalLabel, &ui.interval);
     add_row(&grid, 4, &ui, Message::LanguageLabel, &ui.language);
-    root.append(&grid);
-    root.append(&section(&ui, Message::ExcludedFiles, &ui.excludes));
-    root.append(&section(
+    sync_page.append(&grid);
+    sync_page.append(&section(&ui, Message::ExcludedFiles, &ui.excludes));
+    sync_page.append(&section(
         &ui,
         Message::ExcludedFolders,
         &ui.excluded_folders,
@@ -104,17 +106,23 @@ pub fn activate(
     let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     let save = translated_button(&ui, Message::SaveSettings);
     let open = translated_button(&ui, Message::OpenConfigFile);
-    ui.translated
-        .borrow_mut()
-        .push((ui.sync.clone().upcast(), Message::SyncNow));
+    register(&ui, &ui.sync, Message::SyncNow);
     ui.sync.add_css_class("sync-button");
     actions.append(&save);
     actions.append(&open);
     actions.append(&ui.sync);
-    root.append(&actions);
+    sync_page.append(&actions);
     ui.status.set_halign(gtk::Align::Start);
     ui.status.set_wrap(true);
-    root.append(&ui.status);
+    sync_page.append(&ui.status);
+    let notebook = gtk::Notebook::new();
+    notebook.set_vexpand(true);
+    notebook.append_page(&sync_page, Some(&translated_label(&ui, Message::SyncTab)));
+    notebook.append_page(
+        &crate::accounts_page::build(&ui, window.upcast_ref()),
+        Some(&translated_label(&ui, Message::AccountsTab)),
+    );
+    root.append(&notebook);
     window.set_child(Some(&root));
     apply_language(&ui);
 
@@ -440,39 +448,48 @@ fn language_index(language: Language) -> u32 {
         .position(|candidate| *candidate == language)
         .unwrap_or(0) as u32
 }
-fn selected_language(ui: &Ui) -> Language {
+pub(crate) fn selected_language(ui: &Ui) -> Language {
     Language::ALL
         .get(ui.language.selected() as usize)
         .copied()
         .unwrap_or_default()
 }
-fn t(ui: &Ui, message: Message) -> &'static str {
+pub(crate) fn t(ui: &Ui, message: Message) -> &'static str {
     tr(selected_language(ui).current(), message)
 }
-fn translated_label(ui: &Ui, message: Message) -> gtk::Label {
-    let label = gtk::Label::new(None);
+/// Keeps a label or button text in the selected language; dropped widgets are forgotten.
+pub(crate) fn register(ui: &Ui, widget: &impl IsA<gtk::Widget>, message: Message) {
+    let widget = widget.upcast_ref::<gtk::Widget>();
+    set_text(widget, tr(selected_language(ui).current(), message));
     ui.translated
         .borrow_mut()
-        .push((label.clone().upcast(), message));
+        .push((widget.downgrade(), message));
+}
+pub(crate) fn translated_label(ui: &Ui, message: Message) -> gtk::Label {
+    let label = gtk::Label::new(None);
+    register(ui, &label, message);
     label
 }
-fn translated_button(ui: &Ui, message: Message) -> gtk::Button {
+pub(crate) fn translated_button(ui: &Ui, message: Message) -> gtk::Button {
     let button = gtk::Button::new();
-    ui.translated
-        .borrow_mut()
-        .push((button.clone().upcast(), message));
+    register(ui, &button, message);
     button
+}
+fn set_text(widget: &gtk::Widget, text: &str) {
+    if let Some(label) = widget.downcast_ref::<gtk::Label>() {
+        label.set_text(text);
+    } else if let Some(button) = widget.downcast_ref::<gtk::Button>() {
+        button.set_label(text);
+    }
 }
 fn apply_language(ui: &Ui) {
     let language = selected_language(ui).current();
-    for (widget, message) in ui.translated.borrow().iter() {
-        let text = tr(language, *message);
-        if let Some(label) = widget.downcast_ref::<gtk::Label>() {
-            label.set_text(text);
-        } else if let Some(button) = widget.downcast_ref::<gtk::Button>() {
-            button.set_label(text);
-        }
-    }
+    ui.translated.borrow_mut().retain(|(widget, message)| {
+        widget
+            .upgrade()
+            .map(|widget| set_text(&widget, tr(language, *message)))
+            .is_some()
+    });
     if let Some(model) = ui.language.model().and_downcast::<gtk::StringList>() {
         let selected = ui.language.selected();
         ui.refreshing.set(true);

@@ -70,17 +70,19 @@ fn account_process_lifecycle_with_fake_rclone() {
     assert!(output.stderr.contains("<redacted>"));
     let question = ConfigQuestion::parse(&output.stdout).unwrap();
     assert!(!question.is_done());
-    assert_eq!(question.option.unwrap().name, "config_is_local");
-    let answer = ContinueRequest {
+    assert_eq!(question.option.as_ref().unwrap().name, "config_is_local");
+    let creation = CreateDriveRequest {
         name: "gdrive".into(),
-        state: question.state,
-        result: "true".into(),
-        secret: false,
+        client_id: "id.apps.googleusercontent.com".into(),
+        client_secret: SECRET.into(),
     };
+    let answer = ContinueRequest::answer("gdrive", Some(&creation), &question, "true").unwrap();
     runner
         .start(fake(answer.command().unwrap(), &program), Language::En)
         .unwrap();
-    let AccountResult::Finished(output) = wait(&runner) else {
+    let result = wait(&runner);
+    assert_no_secret(&result);
+    let AccountResult::Finished(output) = result else {
         panic!("expected output")
     };
     assert!(ConfigQuestion::parse(&output.stdout).unwrap().is_done());
@@ -98,7 +100,9 @@ fn account_process_lifecycle_with_fake_rclone() {
     assert!(output.stderr.contains("bad credentials"));
 
     // Cancel kills the child (e.g. while waiting for browser authorization).
-    runner.start(create("slow", &program), Language::En).unwrap();
+    runner
+        .start(create("slow", &program), Language::En)
+        .unwrap();
     assert!(
         runner
             .start(create("slow", &program), Language::En)

@@ -1,3 +1,4 @@
+mod accounts_page;
 mod app;
 mod theme;
 mod tray;

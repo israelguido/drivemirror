@@ -25,9 +25,13 @@ impl AccountCommand {
         }
     }
 
-    /// The secret argument, so a runner can redact it from rclone output.
-    pub fn secret(&self) -> Option<&str> {
-        self.args.get(self.secret_index?).map(String::as_str)
+    /// The secret arguments, so a runner can redact them from rclone output.
+    pub fn secrets(&self) -> Vec<&str> {
+        self.secret_indices
+            .iter()
+            .filter_map(|index| self.args.get(*index))
+            .map(String::as_str)
+            .collect()
     }
 }
 

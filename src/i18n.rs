@@ -312,26 +312,14 @@ pub fn tr(language: Language, message: Message) -> &'static str {
             "Could not start {program}: {error}",
             "No se pudo iniciar {program}: {error}",
         ],
-        SyncTab => [
-            "Sincronização",
-            "Sync",
-            "Sincronización",
-        ],
-        AccountsTab => [
-            "Contas rclone",
-            "Rclone accounts",
-            "Cuentas de rclone",
-        ],
+        SyncTab => ["Sincronização", "Sync", "Sincronización"],
+        AccountsTab => ["Contas rclone", "Rclone accounts", "Cuentas de rclone"],
         ConfiguredRemotes => [
             "Remotes configurados",
             "Configured remotes",
             "Remotos configurados",
         ],
-        Refresh => [
-            "Atualizar",
-            "Refresh",
-            "Actualizar",
-        ],
+        Refresh => ["Atualizar", "Refresh", "Actualizar"],
         NoRemotes => [
             "Nenhum remote configurado.",
             "No remotes configured.",
@@ -342,41 +330,17 @@ pub fn tr(language: Language, message: Message) -> &'static str {
             "New Google Drive remote",
             "Nuevo remoto de Google Drive",
         ],
-        RemoteNameLabel => [
-            "Nome do remote",
-            "Remote name",
-            "Nombre del remoto",
-        ],
-        ClientIdLabel => [
-            "Client ID",
-            "Client ID",
-            "Client ID",
-        ],
-        ClientSecretLabel => [
-            "Client Secret",
-            "Client Secret",
-            "Client Secret",
-        ],
-        CreateRemote => [
-            "Criar remote",
-            "Create remote",
-            "Crear remoto",
-        ],
+        RemoteNameLabel => ["Nome do remote", "Remote name", "Nombre del remoto"],
+        ClientIdLabel => ["Client ID", "Client ID", "Client ID"],
+        ClientSecretLabel => ["Client Secret", "Client Secret", "Client Secret"],
+        CreateRemote => ["Criar remote", "Create remote", "Crear remoto"],
         ClientIdHelp => [
             "Como criar seu próprio Client ID do Google",
             "How to make your own Google Client ID",
             "Cómo crear tu propio Client ID de Google",
         ],
-        Reconnect => [
-            "Reconectar",
-            "Reconnect",
-            "Reconectar",
-        ],
-        Remove => [
-            "Remover",
-            "Remove",
-            "Eliminar",
-        ],
+        Reconnect => ["Reconectar", "Reconnect", "Reconectar"],
+        Remove => ["Remover", "Remove", "Eliminar"],
         ConfirmRemoveTitle => [
             "Remover o remote {name}?",
             "Remove the remote {name}?",
@@ -387,21 +351,13 @@ pub fn tr(language: Language, message: Message) -> &'static str {
             "This only removes the rclone configuration on this computer. No files on Google Drive are deleted.",
             "Esto solo elimina la configuración de rclone en este equipo. No se borra ningún archivo de Google Drive.",
         ],
-        ContinueSetup => [
-            "Continuar",
-            "Continue",
-            "Continuar",
-        ],
+        ContinueSetup => ["Continuar", "Continue", "Continuar"],
         CancelSetup => [
             "Cancelar configuração",
             "Cancel setup",
             "Cancelar configuración",
         ],
-        Options => [
-            "Opções",
-            "Options",
-            "Opciones",
-        ],
+        Options => ["Opções", "Options", "Opciones"],
         RunningRclone => [
             "Executando o rclone…",
             "Running rclone…",
