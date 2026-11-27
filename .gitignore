@@ -1,5 +1,10 @@
 /target/
 /.superpowers/
+/.claude/
+/.maestri/
+.env
+.env.*
+rclone.conf
 *.pkg.tar.*
 *.deb
 pkg/
