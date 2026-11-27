@@ -153,3 +153,19 @@ fn guarded_save_preserves_invalid_external_edits() {
     assert!(config.save_if_unchanged(&path, &Config::default()).is_err());
     assert_eq!(std::fs::read(&path).unwrap(), b"not = [valid");
 }
+
+#[test]
+fn manual_sync_persists_the_selected_config_before_running() {
+    let source = tempfile::tempdir().unwrap();
+    let config_path = source.path().join("settings/config.toml");
+    let selected = Config {
+        local_folder: source.path().to_path_buf(),
+        remote: "gdrive".into(),
+        remote_folder: "Backup/Documents".into(),
+        ..Default::default()
+    };
+    selected
+        .save_for_sync(&config_path, &Config::default())
+        .unwrap();
+    assert_eq!(Config::load(&config_path).unwrap(), selected);
+}

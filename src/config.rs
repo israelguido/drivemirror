@@ -76,6 +76,11 @@ impl Config {
         self.save(path)
     }
 
+    pub fn save_for_sync(&self, path: &Path, baseline: &Self) -> Result<(), String> {
+        self.validate()?;
+        self.save_if_unchanged(path, baseline)
+    }
+
     pub fn validate(&self) -> Result<(), String> {
         if !self.local_folder.is_absolute() || !self.local_folder.is_dir() {
             return Err("Choose an existing absolute local folder".into());

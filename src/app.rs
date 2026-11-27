@@ -193,7 +193,7 @@ pub fn activate(
         }
     ));
 
-    let run_sync: Rc<dyn Fn()> = Rc::new(glib::clone!(
+    let run_sync: Rc<dyn Fn(bool)> = Rc::new(glib::clone!(
         #[strong]
         ui,
         #[strong]
@@ -204,25 +204,31 @@ pub fn activate(
         config_path,
         #[strong]
         last_sync,
-        move || {
+        move |manual| {
             *last_sync.borrow_mut() = Instant::now();
-            let loaded = Config::load(&config_path).and_then(|value| {
-                value.validate()?;
-                Ok(value)
-            });
-            if let Ok(saved) = &loaded
-                && read_ui_raw(&ui) != *saved
-            {
-                populate_ui(&ui, saved);
-                if let Ok(mut current) = config.lock() {
-                    *current = saved.clone();
-                }
-                ui.status.set_text(
-                    "A configuração salva mudou. Confira o destino exibido e sincronize novamente.",
-                );
-                return;
-            }
-            match loaded
+            let prepared = if manual {
+                read_ui(&ui).and_then(|selected| {
+                    let baseline = config
+                        .lock()
+                        .map_err(|_| "Configuração indisponível")?
+                        .clone();
+                    selected.save_for_sync(&config_path, &baseline)?;
+                    Ok(selected)
+                })
+            } else {
+                Config::load(&config_path).and_then(|saved| {
+                    saved.validate()?;
+                    if read_ui_raw(&ui) != saved {
+                        populate_ui(&ui, &saved);
+                        if let Ok(mut current) = config.lock() {
+                            *current = saved;
+                        }
+                        return Err("A configuração salva mudou. Confira o destino exibido; o próximo ciclo usará estes valores.".into());
+                    }
+                    Ok(saved)
+                })
+            };
+            match prepared
                 .and_then(|value| {
                     *config.lock().map_err(|_| "Configuração indisponível")? = value.clone();
                     SyncCommand::from_config(&value)
@@ -240,7 +246,7 @@ pub fn activate(
     ui.sync.connect_clicked(glib::clone!(
         #[strong]
         run_sync,
-        move |_| run_sync()
+        move |_| run_sync(true)
     ));
 
     glib::timeout_add_local(
@@ -266,7 +272,7 @@ pub fn activate(
                 while let Ok(action) = receiver.lock().expect("tray receiver").try_recv() {
                     match action {
                         Action::Show => window.present(),
-                        Action::Sync => run_sync(),
+                        Action::Sync => run_sync(true),
                         Action::Quit if runner.is_running() => {
                             quit_requested.set(true);
                             ui.status.set_text(
@@ -301,7 +307,7 @@ pub fn activate(
                     && last_sync.borrow().elapsed()
                         >= Duration::from_secs(minutes.saturating_mul(60))
                 {
-                    run_sync();
+                    run_sync(false);
                 }
                 glib::ControlFlow::Continue
             }
