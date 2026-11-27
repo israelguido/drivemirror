@@ -1,5 +1,6 @@
 use drivemirror::accounts::{
-    ConfigQuestion, ContinueRequest, CreateDriveRequest, Remote, delete_command, list_remotes,
+    AnswerProblem, ConfigQuestion, ContinueRequest, CreateDriveRequest, Remote,
+    config_dump_command, delete_command, incomplete_drive_remotes, list_remotes,
     list_remotes_command, reconnect_command, validate_remote_name,
 };
 
@@ -279,4 +280,66 @@ fn remote_names_follow_rclone_charset() {
         assert!(reconnect_command(bad).is_err());
         assert!(delete_command(bad).is_err());
     }
+}
+
+#[test]
+fn question_debug_redacts_error_and_password_examples() {
+    let question = ConfigQuestion::parse(&format!(
+        r#"{{"State": "*p", "Option": {{"Name": "x", "IsPassword": true, "Examples": [{{"Value": "{SECRET}", "Help": "h"}}]}}, "Error": "bad {SECRET}"}}"#
+    ))
+    .unwrap();
+    let debug = format!("{question:?}");
+    assert!(!debug.contains(SECRET), "{debug}");
+    assert_eq!(question.error, format!("bad {SECRET}"));
+    let plain = ConfigQuestion::parse(
+        r#"{"State": "*p", "Option": {"Name": "x", "Examples": [{"Value": "visible"}]}}"#,
+    )
+    .unwrap();
+    assert!(format!("{plain:?}").contains("visible"));
+}
+
+#[test]
+fn detects_drive_remotes_without_token_and_never_returns_values() {
+    let dump = format!(
+        r#"{{
+          "ok": {{"type": "drive", "client_secret": "{SECRET}", "token": "{{\"access_token\":\"ya29.fake-token\"}}"}},
+          "half": {{"type": "drive", "client_id": "id", "client_secret": "{SECRET}"}},
+          "empty": {{"type": "drive", "token": ""}},
+          "s3box": {{"type": "s3", "secret_access_key": "{SECRET}"}}
+        }}"#
+    );
+    let mut incomplete = incomplete_drive_remotes(&dump).unwrap();
+    incomplete.sort();
+    assert_eq!(incomplete, ["empty", "half"]);
+    let debug = format!("{incomplete:?}");
+    assert!(
+        !debug.contains(SECRET) && !debug.contains("ya29"),
+        "{debug}"
+    );
+    let error = incomplete_drive_remotes(&format!("{{\"x\": {SECRET}")).unwrap_err();
+    assert!(!error.contains(SECRET), "{error}");
+    assert_eq!(config_dump_command().args, ["config", "dump"]);
+}
+
+#[test]
+fn answers_respect_required_and_exclusive() {
+    let option = |json: &str| {
+        ConfigQuestion::parse(&format!(r#"{{"State": "*s", "Option": {json}}}"#))
+            .unwrap()
+            .option
+            .unwrap()
+    };
+    let required = option(r#"{"Name": "x", "Required": true}"#);
+    assert_eq!(required.check_answer(""), Err(AnswerProblem::Required));
+    assert_eq!(required.check_answer("v"), Ok(()));
+    let optional = option(r#"{"Name": "x"}"#);
+    assert_eq!(optional.check_answer(""), Ok(()));
+    let exclusive = option(
+        r#"{"Name": "x", "Exclusive": true, "Examples": [{"Value": "true"}, {"Value": "false"}]}"#,
+    );
+    assert_eq!(exclusive.check_answer("true"), Ok(()));
+    assert_eq!(
+        exclusive.check_answer("maybe"),
+        Err(AnswerProblem::NotAnOption)
+    );
 }

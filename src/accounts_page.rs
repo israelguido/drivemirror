@@ -11,8 +11,9 @@ use std::{
 use drivemirror::{
     account_runner::{AccountResult, AccountRunner},
     accounts::{
-        self, ConfigQuestion, ContinueRequest, CreateDriveRequest, Remote, delete_command,
-        list_remotes, list_remotes_command, reconnect_command,
+        self, AnswerProblem, ConfigQuestion, ContinueRequest, CreateDriveRequest, Remote,
+        config_dump_command, delete_command, incomplete_drive_remotes, list_remotes,
+        list_remotes_command, reconnect_command,
     },
     i18n::Message,
 };
@@ -25,6 +26,8 @@ const CLIENT_ID_HELP: &str = "https://rclone.org/drive/#making-your-own-client-i
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Job {
     List,
+    /// `rclone config dump`, reduced to tokenless Drive remote names on the runner thread.
+    Dump,
     Configure,
     Delete,
 }
@@ -42,6 +45,8 @@ struct Page {
     incomplete: RefCell<Option<String>>,
     question: RefCell<Option<ConfigQuestion>>,
     remotes: RefCell<Vec<Remote>>,
+    refresh: gtk::Button,
+    create: gtk::Button,
     list: gtk::ListBox,
     name: gtk::Entry,
     client_id: gtk::Entry,
@@ -70,6 +75,8 @@ pub(crate) fn build(ui: &Rc<Ui>, window: &gtk::Window) -> gtk::Box {
         incomplete: RefCell::default(),
         question: RefCell::default(),
         remotes: RefCell::default(),
+        refresh: gtk::Button::new(),
+        create: gtk::Button::new(),
         list: gtk::ListBox::new(),
         name: gtk::Entry::builder().placeholder_text("gdrive").build(),
         client_id: gtk::Entry::builder().hexpand(true).build(),
@@ -98,7 +105,8 @@ pub(crate) fn build(ui: &Rc<Ui>, window: &gtk::Window) -> gtk::Box {
     heading.set_hexpand(true);
     heading.set_xalign(0.0);
     heading.add_css_class("heading");
-    let refresh = translated_button(ui, Message::Refresh);
+    let refresh = page.refresh.clone();
+    crate::app::register(ui, &refresh, Message::Refresh);
     header.append(&heading);
     header.append(&refresh);
     root.append(&header);
@@ -136,7 +144,8 @@ pub(crate) fn build(ui: &Rc<Ui>, window: &gtk::Window) -> gtk::Box {
     }
     root.append(&grid);
     let form_actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    let create = translated_button(ui, Message::CreateRemote);
+    let create = page.create.clone();
+    crate::app::register(ui, &create, Message::CreateRemote);
     create.add_css_class("suggested-action");
     let help = gtk::LinkButton::new(CLIENT_ID_HELP);
     crate::app::register(ui, &help, Message::ClientIdHelp);
@@ -191,8 +200,7 @@ pub(crate) fn build(ui: &Rc<Ui>, window: &gtk::Window) -> gtk::Box {
         #[strong]
         page,
         move |_| {
-            page.question.replace(None);
-            mark_incomplete(&page);
+            end_session(&page);
             show_question(&page);
         }
     ));
@@ -223,7 +231,11 @@ pub(crate) fn build(ui: &Rc<Ui>, window: &gtk::Window) -> gtk::Box {
                 .and_then(|question| question.option.as_ref())
                 .and_then(|option| option.examples.get(index))
             {
-                page.answer.set_text(&example.value);
+                if page.secret_answer.is_visible() {
+                    page.secret_answer.set_text(&example.value);
+                } else {
+                    page.answer.set_text(&example.value);
+                }
             }
         }
     ));
@@ -254,22 +266,52 @@ pub(crate) fn build(ui: &Rc<Ui>, window: &gtk::Window) -> gtk::Box {
 }
 
 fn start(page: &Page, job: Job, command: accounts::AccountCommand, progress: Message) -> bool {
-    match page
-        .runner
-        .start(command, crate::app::selected_language(&page.ui))
-    {
+    match page.runner.start_filtered(
+        command,
+        crate::app::selected_language(&page.ui),
+        if job == Job::Dump {
+            |dump| incomplete_drive_remotes(dump).map(|names| names.join("\n"))
+        } else {
+            |stdout| Ok(stdout.into())
+        },
+    ) {
         Ok(()) => {
             page.job.set(job);
             page.progress_label.set_text(t(&page.ui, progress));
             page.progress.set_visible(true);
             page.spinner.start();
             page.question_box.set_visible(false);
+            update_sensitivity(page);
             true
         }
         Err(error) => {
             page.status.set_text(&error);
             false
         }
+    }
+}
+
+/// A session (process running or question pending) allows only its own Cancel.
+fn update_sensitivity(page: &Page) {
+    let idle = !page.runner.is_running() && page.question.borrow().is_none();
+    for widget in [
+        page.refresh.upcast_ref::<gtk::Widget>(),
+        page.create.upcast_ref(),
+        page.list.upcast_ref(),
+        page.remove_incomplete.upcast_ref(),
+    ] {
+        widget.set_sensitive(idle);
+    }
+}
+
+/// Ends the configuration session; an unfinished creation becomes incomplete.
+fn end_session(page: &Page) {
+    page.answer.set_text("");
+    page.secret_answer.set_text("");
+    if page.creating.borrow().is_some() {
+        mark_incomplete(page);
+    } else {
+        page.question.replace(None);
     }
 }
 
@@ -338,6 +380,16 @@ fn send_answer(page: &Page) {
     } else {
         page.answer.text().trim().to_string()
     };
+    if let Some(problem) = option.and_then(|option| option.check_answer(&value).err()) {
+        page.status.set_text(t(
+            &page.ui,
+            match problem {
+                AnswerProblem::Required => Message::AnswerRequired,
+                AnswerProblem::NotAnOption => Message::AnswerNotAnOption,
+            },
+        ));
+        return;
+    }
     let name = page.target.borrow().clone();
     let command =
         ContinueRequest::answer(&name, page.creating.borrow().as_ref(), &question, &value)
@@ -348,15 +400,23 @@ fn send_answer(page: &Page) {
         } else {
             Message::RunningRclone
         };
-    match command {
-        Ok(command) => {
-            if start(page, Job::Configure, command, progress) {
-                page.secret_answer.set_text("");
-            }
+    let started = match command {
+        Ok(command) => start(page, Job::Configure, command, progress),
+        Err(_) => {
+            page.status
+                .set_text(t(&page.ui, Message::MalformedResponse));
+            false
         }
-        Err(_) => page
-            .status
-            .set_text(t(&page.ui, Message::MalformedResponse)),
+    };
+    if started {
+        page.answer.set_text("");
+        page.secret_answer.set_text("");
+    } else {
+        // A creation cannot resume without its request; a reconnect keeps the question.
+        if page.creating.borrow().is_some() {
+            end_session(page);
+        }
+        show_question(page);
     }
 }
 
@@ -369,11 +429,14 @@ fn finish(page: &Rc<Page>, result: AccountResult) {
         AccountResult::Cancelled => {
             page.status
                 .set_text(t(&page.ui, Message::OperationCancelled));
-            if job == Job::Configure {
-                mark_incomplete(page);
+            end_session(page);
+        }
+        AccountResult::Failed(message) => {
+            page.status.set_text(&message);
+            if page.creating.borrow().is_some() {
+                end_session(page);
             }
         }
-        AccountResult::Failed(message) => page.status.set_text(&message),
         AccountResult::Finished(output) if !output.success => {
             let detail = if output.stderr.is_empty() {
                 output.stdout
@@ -390,7 +453,22 @@ fn finish(page: &Rc<Page>, result: AccountResult) {
             }
         }
         AccountResult::Finished(output) => match job {
-            Job::List => show_remotes(page, list_remotes(&output.stdout)),
+            Job::List => {
+                show_remotes(page, list_remotes(&output.stdout));
+                start(
+                    page,
+                    Job::Dump,
+                    config_dump_command(),
+                    Message::RunningRclone,
+                );
+            }
+            Job::Dump => {
+                page.ui
+                    .incomplete_remotes
+                    .replace(output.stdout.lines().map(String::from).collect());
+                let remotes = page.remotes.borrow().clone();
+                show_remotes(page, remotes);
+            }
             Job::Delete => {
                 page.status
                     .set_text(&t(&page.ui, Message::RemoteRemoved).replace("{name}", &name));
@@ -457,6 +535,8 @@ fn show_question(page: &Page) {
         page.question_box
             .set_visible(question.is_some() && !page.runner.is_running());
         page.question_help.set_text("");
+        drop(question);
+        update_sensitivity(page);
         return;
     };
     page.question_help.set_text(if option.help.is_empty() {
@@ -480,7 +560,13 @@ fn show_question(page: &Page) {
     page.examples.set_visible(!items.is_empty());
     page.answer.set_visible(!option.is_password);
     page.secret_answer.set_visible(option.is_password);
-    page.answer.set_text(&option.default);
+    if option.is_password {
+        page.answer.set_text("");
+        page.secret_answer.set_text(&option.default);
+    } else {
+        page.answer.set_text(&option.default);
+        page.secret_answer.set_text("");
+    }
     if let Some(index) = option
         .examples
         .iter()
@@ -489,6 +575,8 @@ fn show_question(page: &Page) {
         page.examples.set_selected(index as u32);
     }
     page.question_box.set_visible(!page.runner.is_running());
+    drop(question);
+    update_sensitivity(page);
 }
 
 fn show_remotes(page: &Rc<Page>, remotes: Vec<Remote>) {
@@ -507,7 +595,11 @@ fn show_remotes(page: &Rc<Page>, remotes: Vec<Remote>) {
         row.set_margin_bottom(6);
         row.set_margin_start(8);
         row.set_margin_end(8);
-        let label = gtk::Label::new(Some(&format!("{} ({})", remote.name, remote.kind)));
+        let mut text = format!("{} ({})", remote.name, remote.kind);
+        if page.ui.incomplete_remotes.borrow().contains(&remote.name) {
+            text = format!("{text} — {}", t(&page.ui, Message::IncompleteTag));
+        }
+        let label = gtk::Label::new(Some(&text));
         label.set_hexpand(true);
         label.set_xalign(0.0);
         row.append(&label);

@@ -140,6 +140,10 @@ pub enum Message {
     RemoteExists,
     RemoveIncomplete,
     OpenAuthLink,
+    IncompleteTag,
+    RemoteNotAuthorized,
+    AnswerRequired,
+    AnswerNotAnOption,
 }
 
 /// Placeholders `{error}`, `{program}` and `{name}` are filled by callers with `str::replace`.
@@ -418,6 +422,22 @@ pub fn tr(language: Language, message: Message) -> &'static str {
             "Abrir link de autorização",
             "Open authorization link",
             "Abrir enlace de autorización",
+        ],
+        IncompleteTag => ["incompleto", "incomplete", "incompleto"],
+        RemoteNotAuthorized => [
+            "O remote {name} não concluiu a autorização; reconecte-o na aba Contas rclone antes de sincronizar.",
+            "The remote {name} has not finished authorization; reconnect it in the Rclone accounts tab before syncing.",
+            "El remoto {name} no completó la autorización; reconéctalo en la pestaña Cuentas de rclone antes de sincronizar.",
+        ],
+        AnswerRequired => [
+            "Esta resposta é obrigatória.",
+            "This answer is required.",
+            "Esta respuesta es obligatoria.",
+        ],
+        AnswerNotAnOption => [
+            "Escolha uma das opções listadas.",
+            "Choose one of the listed options.",
+            "Elige una de las opciones de la lista.",
         ],
     };
     match language {

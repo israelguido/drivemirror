@@ -85,6 +85,18 @@ impl AccountRunner {
     }
 
     pub fn start(&self, command: AccountCommand, language: Language) -> Result<(), String> {
+        self.start_filtered(command, language, |stdout| Ok(stdout.into()))
+    }
+
+    /// Like `start`, but `filter` replaces stdout on the runner thread, so raw
+    /// output (e.g. `rclone config dump` secrets) is dropped there. A filter
+    /// error marks the result as failed.
+    pub fn start_filtered(
+        &self,
+        command: AccountCommand,
+        language: Language,
+        filter: fn(&str) -> Result<String, String>,
+    ) -> Result<(), String> {
         let language = language.current();
         if self.running.swap(true, Ordering::AcqRel) {
             return Err(tr(language, Message::AlreadyRunning).into());
@@ -95,7 +107,7 @@ impl AccountRunner {
         }
         let runner = self.clone();
         std::thread::spawn(move || {
-            let completed = runner.run(&command, language);
+            let completed = runner.run(&command, language, filter);
             if let Ok(mut url) = runner.auth_url.lock() {
                 *url = None;
             }
@@ -107,7 +119,12 @@ impl AccountRunner {
         Ok(())
     }
 
-    fn run(&self, command: &AccountCommand, language: Language) -> AccountResult {
+    fn run(
+        &self,
+        command: &AccountCommand,
+        language: Language,
+        filter: fn(&str) -> Result<String, String>,
+    ) -> AccountResult {
         let secrets = command.secrets();
         let spawned = Command::new(&command.program)
             .args(&command.args)
@@ -166,8 +183,16 @@ impl AccountRunner {
         if self.cancelled.load(Ordering::Acquire) {
             return AccountResult::Cancelled;
         }
+        let success = status.is_some_and(|status| status.success());
+        let filtered = filter(stdout.trim());
+        drop(stdout);
+        let (success, stdout, stderr) = match (success, filtered) {
+            (true, Ok(stdout)) => (true, stdout, stderr),
+            (true, Err(error)) => (false, String::new(), error),
+            (false, stdout) => (false, stdout.unwrap_or_default(), stderr),
+        };
         AccountResult::Finished(AccountOutput {
-            success: status.is_some_and(|status| status.success()),
+            success,
             stdout: redact(stdout.trim(), &secrets),
             stderr: redact(stderr.trim(), &secrets),
         })

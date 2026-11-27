@@ -298,7 +298,14 @@ impl fmt::Debug for ConfigOption {
         f.debug_struct("ConfigOption")
             .field("name", &self.name)
             .field("default", &default)
-            .field("examples", &self.examples)
+            .field(
+                "examples",
+                if self.is_password {
+                    &REDACTED as &dyn fmt::Debug
+                } else {
+                    &self.examples
+                },
+            )
             .field("required", &self.required)
             .field("is_password", &self.is_password)
             .field("exclusive", &self.exclusive)
@@ -307,16 +314,66 @@ impl fmt::Debug for ConfigOption {
     }
 }
 
-/// `result` may carry config values, so it is always redacted.
+/// `result` and `error` may carry config values, so they are always redacted.
 impl fmt::Debug for ConfigQuestion {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ConfigQuestion")
             .field("state", &self.state)
             .field("option", &self.option)
-            .field("error", &self.error)
+            .field("error", &REDACTED)
             .field("result", &REDACTED)
             .finish()
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnswerProblem {
+    Required,
+    NotAnOption,
+}
+
+impl ConfigOption {
+    /// Mirrors rclone's own checks so the user gets a translated message first.
+    pub fn check_answer(&self, value: &str) -> Result<(), AnswerProblem> {
+        if value.is_empty() {
+            return if self.required {
+                Err(AnswerProblem::Required)
+            } else {
+                Ok(())
+            };
+        }
+        if self.exclusive
+            && !self.examples.is_empty()
+            && !self.examples.iter().any(|example| example.value == value)
+        {
+            return Err(AnswerProblem::NotAnOption);
+        }
+        Ok(())
+    }
+}
+
+/// `rclone config dump` prints every remote with its secrets: only feed its
+/// output to `incomplete_drive_remotes` and drop it right after.
+pub fn config_dump_command() -> AccountCommand {
+    AccountCommand::new(&["config", "dump"], vec![])
+}
+
+/// Names of Google Drive remotes without a non-empty `token`, i.e. whose
+/// authorization never finished. Only names leave this function.
+pub fn incomplete_drive_remotes(dump: &str) -> Result<Vec<String>, String> {
+    let remotes: serde_json::Map<String, Value> =
+        serde_json::from_str(dump).map_err(|_| "Malformed rclone config dump".to_string())?;
+    Ok(remotes
+        .iter()
+        .filter(|(_, remote)| remote.get("type").and_then(Value::as_str) == Some("drive"))
+        .filter(|(_, remote)| {
+            remote
+                .get("token")
+                .and_then(Value::as_str)
+                .is_none_or(|token| token.trim().is_empty())
+        })
+        .map(|(name, _)| name.clone())
+        .collect())
 }
 
 impl ConfigQuestion {

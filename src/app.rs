@@ -20,6 +20,8 @@ use crate::{
 pub(crate) struct Ui {
     local: gtk::Entry,
     pub(crate) remote: gtk::Entry,
+    /// Drive remotes without a token, found by the accounts page; sync refuses them.
+    pub(crate) incomplete_remotes: RefCell<Vec<String>>,
     remote_folder: gtk::Entry,
     interval: gtk::SpinButton,
     excludes: gtk::TextView,
@@ -252,6 +254,15 @@ pub fn activate(
             };
             match prepared
                 .and_then(|value| {
+                    let remote = value.remote.trim();
+                    if ui
+                        .incomplete_remotes
+                        .borrow()
+                        .iter()
+                        .any(|name| name == remote)
+                    {
+                        return Err(t(&ui, Message::RemoteNotAuthorized).replace("{name}", remote));
+                    }
                     *config
                         .lock()
                         .map_err(|_| t(&ui, Message::ConfigUnavailable))? = value.clone();
@@ -435,6 +446,7 @@ fn build_ui(config: &Config, tray: Option<ksni::blocking::Handle<DriveMirrorTray
         sync: gtk::Button::new(),
         language,
         translated: RefCell::default(),
+        incomplete_remotes: RefCell::default(),
         refreshing: Cell::new(false),
         tray,
     };

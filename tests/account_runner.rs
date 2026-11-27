@@ -2,7 +2,10 @@ use std::{os::unix::fs::PermissionsExt, path::Path, time::Duration};
 
 use drivemirror::{
     account_runner::{AccountResult, AccountRunner},
-    accounts::{AccountCommand, ConfigQuestion, ContinueRequest, CreateDriveRequest},
+    accounts::{
+        AccountCommand, ConfigQuestion, ContinueRequest, CreateDriveRequest, config_dump_command,
+        incomplete_drive_remotes,
+    },
     i18n::Language,
 };
 
@@ -13,6 +16,7 @@ case "$*" in
   *--continue*--result\ true*) printf '{"State":"","Result":"done"}' ;;
   *failing*) echo "error: bad credentials for $*" >&2; exit 1 ;;
   *slow*) exec sleep 30 ;;
+  config\ dump) printf '{"ok":{"type":"drive","token":"ya29.fake-token"},"half":{"type":"drive","client_secret":"GOCSPX-fake-secret-123"}}' ;;
   *authwait*) echo "NOTICE: see https://rclone.org/drive/ for help" >&2
      echo "Please go to http://127.0.0.1:53682/auth?state=$8 to log in" >&2
      sleep 1 ;;
@@ -135,6 +139,23 @@ fn account_process_lifecycle_with_fake_rclone() {
     let result = wait(&runner);
     assert_no_secret(&result);
     assert_eq!(runner.auth_url(), None);
+
+    // The config dump is reduced to remote names inside the runner thread.
+    runner
+        .start_filtered(
+            fake(config_dump_command(), &program),
+            Language::En,
+            |dump| incomplete_drive_remotes(dump).map(|names| names.join("\n")),
+        )
+        .unwrap();
+    let result = wait(&runner);
+    assert_no_secret(&result);
+    assert!(!format!("{result:?}").contains("ya29"));
+    let AccountResult::Finished(output) = result else {
+        panic!("expected output")
+    };
+    assert!(output.success);
+    assert_eq!(output.stdout, "half");
 
     // Missing rclone is actionable.
     let missing = fake(create("gdrive", &program), Path::new("missing-rclone-test"));
