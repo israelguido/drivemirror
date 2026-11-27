@@ -5,3 +5,7 @@
 pkg/
 src/pkg/
 
+
+# Published packages live in releases/
+!/releases/*.deb
+!/releases/*.pkg.tar.*
