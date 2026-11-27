@@ -1,7 +1,7 @@
 use drivemirror::accounts::{
-    AnswerProblem, ConfigQuestion, ContinueRequest, CreateDriveRequest, Remote,
+    AnswerProblem, ConfigQuestion, ContinueRequest, CreateDriveRequest, Remote, RemoteProblem,
     config_dump_command, delete_command, incomplete_drive_remotes, list_remotes,
-    list_remotes_command, reconnect_command, validate_remote_name,
+    list_remotes_command, reconnect_command, remote_problem, validate_remote_name,
 };
 
 const SECRET: &str = "GOCSPX-very-secret-value";
@@ -341,5 +341,30 @@ fn answers_respect_required_and_exclusive() {
     assert_eq!(
         exclusive.check_answer("maybe"),
         Err(AnswerProblem::NotAnOption)
+    );
+}
+
+#[test]
+fn sync_remote_must_exist_when_the_list_is_known() {
+    let known = vec!["gdrive".to_string(), "half".to_string()];
+    let incomplete = vec!["half".to_string()];
+    assert_eq!(remote_problem("gdrive", Some(&known), &incomplete), None);
+    assert_eq!(
+        remote_problem("missing", Some(&known), &incomplete),
+        Some(RemoteProblem::Missing)
+    );
+    assert_eq!(
+        remote_problem("half", Some(&known), &incomplete),
+        Some(RemoteProblem::Incomplete)
+    );
+    assert_eq!(
+        remote_problem("gdrive", Some(&[]), &[]),
+        Some(RemoteProblem::Missing)
+    );
+    // Unknown list (not loaded yet or listing failed): never block on existence.
+    assert_eq!(remote_problem("missing", None, &[]), None);
+    assert_eq!(
+        remote_problem("half", None, &incomplete),
+        Some(RemoteProblem::Incomplete)
     );
 }

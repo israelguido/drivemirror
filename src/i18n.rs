@@ -144,6 +144,7 @@ pub enum Message {
     RemoteNotAuthorized,
     AnswerRequired,
     AnswerNotAnOption,
+    RemoteMissing,
 }
 
 /// Placeholders `{error}`, `{program}` and `{name}` are filled by callers with `str::replace`.
@@ -438,6 +439,11 @@ pub fn tr(language: Language, message: Message) -> &'static str {
             "Escolha uma das opções listadas.",
             "Choose one of the listed options.",
             "Elige una de las opciones de la lista.",
+        ],
+        RemoteMissing => [
+            "O remote \"{name}\" não existe no rclone. Crie-o na aba Contas rclone.",
+            "The remote \"{name}\" does not exist in rclone. Create it in the Rclone accounts tab.",
+            "El remoto \"{name}\" no existe en rclone. Créalo en la pestaña Cuentas de rclone.",
         ],
     };
     match language {

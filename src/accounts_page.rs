@@ -425,6 +425,18 @@ fn finish(page: &Rc<Page>, result: AccountResult) {
     page.progress.set_visible(false);
     let job = page.job.get();
     let name = page.target.borrow().clone();
+    if job == Job::List {
+        // Only a successful listing makes the list known; sync never blocks on an unknown one.
+        page.ui.known_remotes.replace(match &result {
+            AccountResult::Finished(output) if output.success => Some(
+                list_remotes(&output.stdout)
+                    .into_iter()
+                    .map(|remote| remote.name)
+                    .collect(),
+            ),
+            _ => None,
+        });
+    }
     match result {
         AccountResult::Cancelled => {
             page.status

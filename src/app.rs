@@ -7,7 +7,9 @@ use std::{
 };
 
 use drivemirror::{
-    Config, SyncCommand, SyncRunner, default_config_path,
+    Config, SyncCommand, SyncRunner,
+    accounts::{RemoteProblem, remote_problem},
+    default_config_path,
     i18n::{Language, Message, tr},
 };
 use gtk::{gio, glib, prelude::*};
@@ -17,11 +19,15 @@ use crate::{
     tray::{Action, DriveMirrorTray},
 };
 
+type SyncBlock = (Option<String>, Option<Vec<String>>, Vec<String>);
+
 pub(crate) struct Ui {
     local: gtk::Entry,
     pub(crate) remote: gtk::Entry,
     /// Drive remotes without a token, found by the accounts page; sync refuses them.
     pub(crate) incomplete_remotes: RefCell<Vec<String>>,
+    /// Remote names from the last successful listing; `None` while unknown.
+    pub(crate) known_remotes: RefCell<Option<Vec<String>>>,
     remote_folder: gtk::Entry,
     interval: gtk::SpinButton,
     excludes: gtk::TextView,
@@ -53,6 +59,9 @@ pub fn activate(
     let runner = SyncRunner::default();
     let last_sync = Rc::new(RefCell::new(Instant::now()));
     let quit_requested = Rc::new(Cell::new(false));
+    // What the automatic sync last refused (config text, known and incomplete remotes):
+    // it stays quiet until one of them changes instead of repeating every interval.
+    let blocked = Rc::new(RefCell::new(None::<SyncBlock>));
     let window = gtk::ApplicationWindow::builder()
         .application(app)
         .title("DriveMirror")
@@ -228,8 +237,21 @@ pub fn activate(
         config_path,
         #[strong]
         last_sync,
+        #[strong]
+        blocked,
         move |manual| {
             *last_sync.borrow_mut() = Instant::now();
+            let block: SyncBlock = (
+                std::fs::read_to_string(&config_path).ok(),
+                ui.known_remotes.borrow().clone(),
+                ui.incomplete_remotes.borrow().clone(),
+            );
+            if !manual && blocked.borrow().as_ref() == Some(&block) {
+                return;
+            }
+            blocked.replace(None);
+            // Set when the failure only goes away after the config or remote list changes.
+            let lasting = Cell::new(false);
             let prepared = if manual {
                 read_ui(&ui).and_then(|selected| {
                     let baseline = config
@@ -240,28 +262,38 @@ pub fn activate(
                     Ok(selected)
                 })
             } else {
-                Config::load(&config_path).and_then(|saved| {
-                    saved.validate()?;
-                    if read_ui_raw(&ui) != saved {
-                        populate_ui(&ui, &saved);
-                        if let Ok(mut current) = config.lock() {
-                            *current = saved;
+                Config::load(&config_path)
+                    .and_then(|saved| {
+                        saved.validate()?;
+                        Ok(saved)
+                    })
+                    .inspect_err(|_| lasting.set(true))
+                    .and_then(|saved| {
+                        if read_ui_raw(&ui) != saved {
+                            populate_ui(&ui, &saved);
+                            if let Ok(mut current) = config.lock() {
+                                *current = saved;
+                            }
+                            return Err(t(&ui, Message::SavedConfigChanged).into());
                         }
-                        return Err(t(&ui, Message::SavedConfigChanged).into());
-                    }
-                    Ok(saved)
-                })
+                        Ok(saved)
+                    })
             };
             match prepared
                 .and_then(|value| {
                     let remote = value.remote.trim();
-                    if ui
-                        .incomplete_remotes
-                        .borrow()
-                        .iter()
-                        .any(|name| name == remote)
-                    {
-                        return Err(t(&ui, Message::RemoteNotAuthorized).replace("{name}", remote));
+                    let problem = remote_problem(
+                        remote,
+                        ui.known_remotes.borrow().as_deref(),
+                        &ui.incomplete_remotes.borrow(),
+                    );
+                    if let Some(problem) = problem {
+                        lasting.set(true);
+                        let message = match problem {
+                            RemoteProblem::Missing => Message::RemoteMissing,
+                            RemoteProblem::Incomplete => Message::RemoteNotAuthorized,
+                        };
+                        return Err(t(&ui, message).replace("{name}", remote));
                     }
                     *config
                         .lock()
@@ -274,7 +306,12 @@ pub fn activate(
                     ui.status.set_text(t(&ui, Message::Syncing));
                     ui.sync.set_sensitive(false);
                 }
-                Err(error) => ui.status.set_text(&error),
+                Err(error) => {
+                    if !manual && lasting.get() {
+                        blocked.replace(Some(block));
+                    }
+                    ui.status.set_text(&error);
+                }
             }
         }
     ));
@@ -447,6 +484,7 @@ fn build_ui(config: &Config, tray: Option<ksni::blocking::Handle<DriveMirrorTray
         language,
         translated: RefCell::default(),
         incomplete_remotes: RefCell::default(),
+        known_remotes: RefCell::default(),
         refreshing: Cell::new(false),
         tray,
     };

@@ -352,6 +352,28 @@ impl ConfigOption {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoteProblem {
+    Missing,
+    Incomplete,
+}
+
+/// Why `remote` cannot be synced. `known` is `None` while the remote list is
+/// unknown (not loaded yet or listing failed); then existence is not checked.
+pub fn remote_problem(
+    remote: &str,
+    known: Option<&[String]>,
+    incomplete: &[String],
+) -> Option<RemoteProblem> {
+    if incomplete.iter().any(|name| name == remote) {
+        Some(RemoteProblem::Incomplete)
+    } else if known.is_some_and(|known| !known.iter().any(|name| name == remote)) {
+        Some(RemoteProblem::Missing)
+    } else {
+        None
+    }
+}
+
 /// `rclone config dump` prints every remote with its secrets: only feed its
 /// output to `incomplete_drive_remotes` and drop it right after.
 pub fn config_dump_command() -> AccountCommand {
