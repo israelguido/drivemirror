@@ -36,6 +36,9 @@ Depois de ativar, a mudança pode levar alguns minutos para valer.
 
 ## 3. Criar a conta no DriveMirror
 
+![Aba Contas rclone com a lista de remotes e o formulário para criar um remote do Google Drive](https://raw.githubusercontent.com/israelguido/drivemirror/main/docs/images/janela-contas.png)
+
+
 1. Abra o DriveMirror e vá para a aba **Contas rclone**.
 2. Em **Novo remote Google Drive**, preencha:
    - **Nome do remote**: por exemplo `gdrive` (letras, números, espaços internos

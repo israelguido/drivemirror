@@ -2,6 +2,9 @@
 
 ## Configurar o que sincronizar
 
+![Aba Sincronização do DriveMirror com pasta local, remote, pasta no Drive, intervalo, idioma e exclusões](https://raw.githubusercontent.com/israelguido/drivemirror/main/docs/images/janela-sincronizacao.png)
+
+
 Na aba **Sincronização** da janela completa:
 
 | Campo | O que informar |

@@ -5,6 +5,10 @@ uma pasta do seu computador** em uma subpasta privada do **Google Drive**. Ele
 usa o [rclone](https://rclone.org/) por baixo e fica na bandeja do sistema,
 sincronizando quando você pede e a cada intervalo configurado.
 
+![Aba Sincronização do DriveMirror com pasta local, remote, pasta no Drive, intervalo, idioma e exclusões](https://raw.githubusercontent.com/israelguido/drivemirror/main/docs/images/janela-sincronizacao.png)
+
+*Capturas feitas com dados de demonstração.*
+
 ## Para quem é
 
 - Quem usa Linux (Omarchy, Arch, Debian 13, Ubuntu 24.10+) e quer uma pasta

@@ -51,6 +51,14 @@ intervalo configurado. O Drive passa a ter uma cópia fiel da pasta local.
 É uma cópia de mão única (computador → Drive). Alterações feitas direto no
 Drive não voltam para o computador e são sobrescritas na próxima sincronização.
 
+## Telas
+
+| Sincronização | Contas rclone |
+|---|---|
+| ![Aba Sincronização do DriveMirror com pasta local, remote, pasta no Drive, intervalo, idioma e exclusões](docs/images/janela-sincronizacao.png) | ![Aba Contas rclone com a lista de remotes e o formulário para criar um remote do Google Drive](docs/images/janela-contas.png) |
+
+*Capturas feitas com dados de demonstração.*
+
 ## Recursos
 
 - sincronização manual (janela, painel ou menu da bandeja) e automática por
