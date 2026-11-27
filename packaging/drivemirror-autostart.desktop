@@ -1,8 +1,11 @@
 [Desktop Entry]
 Type=Application
 Name=DriveMirror
+Name[pt_BR]=DriveMirror
+Name[es]=DriveMirror
 Comment=Start DriveMirror in the system tray
 Comment[pt_BR]=Inicia o DriveMirror na bandeja do sistema
+Comment[es]=Inicia DriveMirror en la bandeja del sistema
 Exec=drivemirror --tray
 Icon=drivemirror
 Terminal=false

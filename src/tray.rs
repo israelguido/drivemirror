@@ -1,3 +1,4 @@
+use drivemirror::i18n::{Language, Message, tr};
 use ksni::{
     Tray,
     blocking::{Handle, TrayMethods},
@@ -13,6 +14,7 @@ pub enum Action {
 
 pub(crate) struct DriveMirrorTray {
     sender: std::sync::mpsc::Sender<Action>,
+    pub(crate) language: Language,
 }
 
 impl Tray for DriveMirrorTray {
@@ -31,7 +33,7 @@ impl Tray for DriveMirrorTray {
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
         vec![
             StandardItem {
-                label: "Abrir DriveMirror".into(),
+                label: tr(self.language, Message::OpenApp).into(),
                 activate: Box::new(|tray: &mut Self| {
                     let _ = tray.sender.send(Action::Show);
                 }),
@@ -39,7 +41,7 @@ impl Tray for DriveMirrorTray {
             }
             .into(),
             StandardItem {
-                label: "Sincronizar agora".into(),
+                label: tr(self.language, Message::SyncNow).into(),
                 activate: Box::new(|tray: &mut Self| {
                     let _ = tray.sender.send(Action::Sync);
                 }),
@@ -48,7 +50,7 @@ impl Tray for DriveMirrorTray {
             .into(),
             ksni::MenuItem::Separator,
             StandardItem {
-                label: "Sair".into(),
+                label: tr(self.language, Message::Quit).into(),
                 activate: Box::new(|tray: &mut Self| {
                     let _ = tray.sender.send(Action::Quit);
                 }),
@@ -61,6 +63,7 @@ impl Tray for DriveMirrorTray {
 
 pub fn start(
     sender: std::sync::mpsc::Sender<Action>,
+    language: Language,
 ) -> Result<Handle<DriveMirrorTray>, ksni::Error> {
-    DriveMirrorTray { sender }.spawn()
+    DriveMirrorTray { sender, language }.spawn()
 }

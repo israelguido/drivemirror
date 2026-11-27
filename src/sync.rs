@@ -1,4 +1,7 @@
-use crate::Config;
+use crate::{
+    Config,
+    i18n::{Language, Message, tr},
+};
 use std::{
     process::Command,
     sync::{
@@ -34,9 +37,10 @@ impl SyncRunner {
         self.result.lock().ok()?.clone()
     }
 
-    pub fn start(&self, command: SyncCommand) -> Result<(), String> {
+    pub fn start(&self, command: SyncCommand, language: Language) -> Result<(), String> {
+        let language = language.current();
         if self.running.swap(true, Ordering::AcqRel) {
-            return Err("A synchronization is already running".into());
+            return Err(tr(language, Message::AlreadyRunning).into());
         }
         if let Ok(mut result) = self.result.lock() {
             *result = None;
@@ -59,14 +63,14 @@ impl SyncRunner {
                 }
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => SyncResult {
                     success: false,
-                    message: format!(
-                        "{} was not found; install it or check PATH",
-                        command.program
-                    ),
+                    message: tr(language, Message::ProgramNotFound)
+                        .replace("{program}", &command.program),
                 },
                 Err(error) => SyncResult {
                     success: false,
-                    message: format!("Could not start {}: {error}", command.program),
+                    message: tr(language, Message::StartFailed)
+                        .replace("{program}", &command.program)
+                        .replace("{error}", &error.to_string()),
                 },
             };
             if let Ok(mut value) = result.lock() {

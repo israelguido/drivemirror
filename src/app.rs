@@ -6,10 +6,16 @@ use std::{
     time::{Duration, Instant},
 };
 
-use drivemirror::{Config, SyncCommand, SyncRunner, default_config_path};
+use drivemirror::{
+    Config, SyncCommand, SyncRunner, default_config_path,
+    i18n::{Language, Message, tr},
+};
 use gtk::{gio, glib, prelude::*};
 
-use crate::{theme, tray::Action};
+use crate::{
+    theme,
+    tray::{Action, DriveMirrorTray},
+};
 
 struct Ui {
     local: gtk::Entry,
@@ -20,6 +26,10 @@ struct Ui {
     excluded_folders: gtk::TextView,
     status: gtk::Label,
     sync: gtk::Button,
+    language: gtk::DropDown,
+    translated: RefCell<Vec<(gtk::Widget, Message)>>,
+    refreshing: Cell<bool>,
+    tray: Option<ksni::blocking::Handle<DriveMirrorTray>>,
 }
 
 pub fn activate(
@@ -27,6 +37,7 @@ pub fn activate(
     receiver: Arc<Mutex<std::sync::mpsc::Receiver<Action>>>,
     start_hidden: bool,
     tray_error: Option<String>,
+    tray: Option<ksni::blocking::Handle<DriveMirrorTray>>,
 ) {
     if !app.windows().is_empty() {
         app.windows()[0].present();
@@ -54,11 +65,10 @@ pub fn activate(
         glib::Propagation::Stop
     });
 
-    let ui = Rc::new(build_ui(&initial));
+    let ui = Rc::new(build_ui(&initial, tray));
     if let Some(error) = &tray_error {
-        ui.status.set_text(&format!(
-            "Bandeja indisponível: {error}. Mantenha esta janela aberta para controlar o app."
-        ));
+        ui.status
+            .set_text(&t(&ui, Message::TrayUnavailable).replace("{error}", error));
     }
     let root = gtk::Box::new(gtk::Orientation::Vertical, 14);
     root.set_margin_top(22);
@@ -68,9 +78,7 @@ pub fn activate(
     let title = gtk::Label::new(Some("DriveMirror"));
     title.add_css_class("title-1");
     title.set_halign(gtk::Align::Start);
-    let subtitle = gtk::Label::new(Some(
-        "Espelhe uma pasta local para um destino privado do rclone.",
-    ));
+    let subtitle = translated_label(&ui, Message::Subtitle);
     subtitle.set_halign(gtk::Align::Start);
     subtitle.add_css_class("dim-label");
     root.append(&title);
@@ -79,25 +87,26 @@ pub fn activate(
         .row_spacing(10)
         .column_spacing(10)
         .build();
-    add_row(&grid, 0, "Pasta local", &ui.local);
-    let choose = gtk::Button::with_label("Escolher…");
+    add_row(&grid, 0, &ui, Message::LocalFolder, &ui.local);
+    let choose = translated_button(&ui, Message::Choose);
     grid.attach(&choose, 2, 0, 1, 1);
-    add_row(&grid, 1, "Remoto rclone", &ui.remote);
-    add_row(&grid, 2, "Pasta no Drive", &ui.remote_folder);
-    add_row(&grid, 3, "Intervalo (min)", &ui.interval);
+    add_row(&grid, 1, &ui, Message::RemoteLabel, &ui.remote);
+    add_row(&grid, 2, &ui, Message::RemoteFolderLabel, &ui.remote_folder);
+    add_row(&grid, 3, &ui, Message::IntervalLabel, &ui.interval);
+    add_row(&grid, 4, &ui, Message::LanguageLabel, &ui.language);
     root.append(&grid);
+    root.append(&section(&ui, Message::ExcludedFiles, &ui.excludes));
     root.append(&section(
-        "Arquivos ignorados (um padrão por linha)",
-        &ui.excludes,
-    ));
-    root.append(&section(
-        "Pastas ignoradas (um padrão por linha)",
+        &ui,
+        Message::ExcludedFolders,
         &ui.excluded_folders,
     ));
     let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    let save = gtk::Button::with_label("Salvar configurações");
-    let open = gtk::Button::with_label("Abrir arquivo de configuração");
-    ui.sync.set_label("Sincronizar agora");
+    let save = translated_button(&ui, Message::SaveSettings);
+    let open = translated_button(&ui, Message::OpenConfigFile);
+    ui.translated
+        .borrow_mut()
+        .push((ui.sync.clone().upcast(), Message::SyncNow));
     ui.sync.add_css_class("sync-button");
     actions.append(&save);
     actions.append(&open);
@@ -107,8 +116,10 @@ pub fn activate(
     ui.status.set_wrap(true);
     root.append(&ui.status);
     window.set_child(Some(&root));
+    apply_language(&ui);
 
     let local = ui.local.clone();
+    let chooser_ui = ui.clone();
     let chooser = Rc::new(RefCell::new(None::<gtk::FileChooserNative>));
     choose.connect_clicked(glib::clone!(
         #[weak]
@@ -117,11 +128,11 @@ pub fn activate(
         chooser,
         move |_| {
             let dialog = gtk::FileChooserNative::builder()
-                .title("Escolha a pasta local")
+                .title(t(&chooser_ui, Message::ChooseLocalFolder))
                 .transient_for(&window)
                 .action(gtk::FileChooserAction::SelectFolder)
-                .accept_label("Escolher")
-                .cancel_label("Cancelar")
+                .accept_label(t(&chooser_ui, Message::Accept))
+                .cancel_label(t(&chooser_ui, Message::Cancel))
                 .build();
             dialog.connect_response(glib::clone!(
                 #[weak]
@@ -156,28 +167,29 @@ pub fn activate(
             match read_ui(&ui).and_then(|value| {
                 let baseline = config
                     .lock()
-                    .map_err(|_| "Configuração indisponível")?
+                    .map_err(|_| t(&ui, Message::ConfigUnavailable))?
                     .clone();
                 value.save_if_unchanged(&config_path, &baseline)?;
-                *config.lock().map_err(|_| "Configuração indisponível")? = value;
+                *config
+                    .lock()
+                    .map_err(|_| t(&ui, Message::ConfigUnavailable))? = value;
                 Ok(())
             }) {
                 Ok(()) => {
                     *last_sync.borrow_mut() = Instant::now();
-                    ui.status
-                        .set_text("Configurações salvas. O próximo ciclo usa o novo intervalo.");
+                    ui.status.set_text(t(&ui, Message::SettingsSaved));
                 }
                 Err(error) => ui.status.set_text(&error),
             }
         }
     ));
-    let status = ui.status.clone();
     open.connect_clicked(glib::clone!(
         #[strong]
         config_path,
-        #[weak]
-        status,
+        #[strong]
+        ui,
         move |_| {
+            let status = &ui.status;
             if !config_path.exists()
                 && let Err(error) = Config::default().save(&config_path)
             {
@@ -188,7 +200,9 @@ pub fn activate(
             if let Err(error) =
                 gio::AppInfo::launch_default_for_uri(&uri, gio::AppLaunchContext::NONE)
             {
-                status.set_text(&format!("Não foi possível abrir o editor: {error}"));
+                status.set_text(
+                    &t(&ui, Message::OpenEditorFailed).replace("{error}", &error.to_string()),
+                );
             }
         }
     ));
@@ -210,7 +224,7 @@ pub fn activate(
                 read_ui(&ui).and_then(|selected| {
                     let baseline = config
                         .lock()
-                        .map_err(|_| "Configuração indisponível")?
+                        .map_err(|_| t(&ui, Message::ConfigUnavailable))?
                         .clone();
                     selected.save_for_sync(&config_path, &baseline)?;
                     Ok(selected)
@@ -223,20 +237,22 @@ pub fn activate(
                         if let Ok(mut current) = config.lock() {
                             *current = saved;
                         }
-                        return Err("A configuração salva mudou. Confira o destino exibido; o próximo ciclo usará estes valores.".into());
+                        return Err(t(&ui, Message::SavedConfigChanged).into());
                     }
                     Ok(saved)
                 })
             };
             match prepared
                 .and_then(|value| {
-                    *config.lock().map_err(|_| "Configuração indisponível")? = value.clone();
+                    *config
+                        .lock()
+                        .map_err(|_| t(&ui, Message::ConfigUnavailable))? = value.clone();
                     SyncCommand::from_config(&value)
                 })
-                .and_then(|command| runner.start(command))
+                .and_then(|command| runner.start(command, selected_language(&ui)))
             {
                 Ok(()) => {
-                    ui.status.set_text("Sincronizando…");
+                    ui.status.set_text(t(&ui, Message::Syncing));
                     ui.sync.set_sensitive(false);
                 }
                 Err(error) => ui.status.set_text(&error),
@@ -275,9 +291,7 @@ pub fn activate(
                         Action::Sync => run_sync(true),
                         Action::Quit if runner.is_running() => {
                             quit_requested.set(true);
-                            ui.status.set_text(
-                                "Aguardando a sincronização terminar para sair com segurança…",
-                            );
+                            ui.status.set_text(t(&ui, Message::WaitingToQuit));
                         }
                         Action::Quit => app.quit(),
                     }
@@ -287,12 +301,12 @@ pub fn activate(
                     if let Some(result) = runner.last_result() {
                         let message = if result.success {
                             if result.message.is_empty() {
-                                "Sincronização concluída.".into()
+                                t(&ui, Message::SyncDone).into()
                             } else {
                                 result.message
                             }
                         } else {
-                            format!("Falha: {}", result.message)
+                            t(&ui, Message::SyncFailed).replace("{error}", &result.message)
                         };
                         ui.status.set_text(&message);
                         *last_sync.borrow_mut() = Instant::now();
@@ -337,9 +351,7 @@ pub fn activate(
                                 populate_ui(&ui, &value);
                                 *current = value;
                             } else if *current != value {
-                                config_status.set_text(
-                                    "Há alterações não salvas e o arquivo mudou externamente; revise antes de sincronizar.",
-                                );
+                                config_status.set_text(t(&ui, Message::UnsavedExternalChange));
                             }
                         }
                     }
@@ -350,12 +362,44 @@ pub fn activate(
             }
         ),
     );
+    ui.language.connect_selected_notify(glib::clone!(
+        #[strong]
+        ui,
+        #[strong]
+        config,
+        #[strong]
+        config_path,
+        move |_| {
+            if ui.refreshing.get() {
+                return;
+            }
+            apply_language(&ui);
+            // Persist only the language; other edited fields stay unsaved until Save.
+            let language = selected_language(&ui);
+            let result = config
+                .lock()
+                .map_err(|_| t(&ui, Message::ConfigUnavailable).to_string())
+                .and_then(|mut current| {
+                    let value = Config {
+                        language,
+                        ..current.clone()
+                    };
+                    value.save_if_unchanged(&config_path, &current)?;
+                    *current = value;
+                    Ok(())
+                });
+            match result {
+                Ok(()) => ui.status.set_text(t(&ui, Message::LanguageSaved)),
+                Err(error) => ui.status.set_text(&error),
+            }
+        }
+    ));
     if !start_hidden || tray_error.is_some() {
         window.present();
     }
 }
 
-fn build_ui(config: &Config) -> Ui {
+fn build_ui(config: &Config, tray: Option<ksni::blocking::Handle<DriveMirrorTray>>) -> Ui {
     let local = gtk::Entry::new();
     local.set_hexpand(true);
     local.set_text(&config.local_folder.to_string_lossy());
@@ -369,22 +413,80 @@ fn build_ui(config: &Config) -> Ui {
     interval.set_value(config.interval_minutes as f64);
     let excludes = text_view(&config.exclude);
     let excluded_folders = text_view(&config.exclude_folders);
-    Ui {
+    // Index order matches Language::ALL; item 0 is retranslated by apply_language.
+    let language = gtk::DropDown::from_strings(&["", "Português (Brasil)", "English", "Español"]);
+    language.set_selected(language_index(config.language));
+    let ui = Ui {
         local,
         remote,
         remote_folder,
         interval,
         excludes,
         excluded_folders,
-        status: gtk::Label::new(Some(
-            "Configure o destino e salve antes da primeira sincronização.",
-        )),
+        status: gtk::Label::new(None),
         sync: gtk::Button::new(),
+        language,
+        translated: RefCell::default(),
+        refreshing: Cell::new(false),
+        tray,
+    };
+    ui.status.set_text(t(&ui, Message::InitialStatus));
+    ui
+}
+
+fn language_index(language: Language) -> u32 {
+    Language::ALL
+        .iter()
+        .position(|candidate| *candidate == language)
+        .unwrap_or(0) as u32
+}
+fn selected_language(ui: &Ui) -> Language {
+    Language::ALL
+        .get(ui.language.selected() as usize)
+        .copied()
+        .unwrap_or_default()
+}
+fn t(ui: &Ui, message: Message) -> &'static str {
+    tr(selected_language(ui).current(), message)
+}
+fn translated_label(ui: &Ui, message: Message) -> gtk::Label {
+    let label = gtk::Label::new(None);
+    ui.translated
+        .borrow_mut()
+        .push((label.clone().upcast(), message));
+    label
+}
+fn translated_button(ui: &Ui, message: Message) -> gtk::Button {
+    let button = gtk::Button::new();
+    ui.translated
+        .borrow_mut()
+        .push((button.clone().upcast(), message));
+    button
+}
+fn apply_language(ui: &Ui) {
+    let language = selected_language(ui).current();
+    for (widget, message) in ui.translated.borrow().iter() {
+        let text = tr(language, *message);
+        if let Some(label) = widget.downcast_ref::<gtk::Label>() {
+            label.set_text(text);
+        } else if let Some(button) = widget.downcast_ref::<gtk::Button>() {
+            button.set_label(text);
+        }
+    }
+    if let Some(model) = ui.language.model().and_downcast::<gtk::StringList>() {
+        let selected = ui.language.selected();
+        ui.refreshing.set(true);
+        model.splice(0, 1, &[tr(language, Message::SystemLanguage)]);
+        ui.language.set_selected(selected);
+        ui.refreshing.set(false);
+    }
+    if let Some(tray) = &ui.tray {
+        tray.update(|tray| tray.language = language);
     }
 }
 
-fn add_row<W: IsA<gtk::Widget>>(grid: &gtk::Grid, row: i32, text: &str, widget: &W) {
-    let label = gtk::Label::new(Some(text));
+fn add_row<W: IsA<gtk::Widget>>(grid: &gtk::Grid, row: i32, ui: &Ui, message: Message, widget: &W) {
+    let label = translated_label(ui, message);
     label.set_halign(gtk::Align::Start);
     grid.attach(&label, 0, row, 1, 1);
     grid.attach(widget, 1, row, 1, 1);
@@ -396,9 +498,9 @@ fn text_view(lines: &[String]) -> gtk::TextView {
     view.buffer().set_text(&lines.join("\n"));
     view
 }
-fn section(title: &str, view: &gtk::TextView) -> gtk::Box {
+fn section(ui: &Ui, message: Message, view: &gtk::TextView) -> gtk::Box {
     let box_ = gtk::Box::new(gtk::Orientation::Vertical, 5);
-    let label = gtk::Label::new(Some(title));
+    let label = translated_label(ui, message);
     label.set_halign(gtk::Align::Start);
     let scroll = gtk::ScrolledWindow::builder()
         .min_content_height(90)
@@ -431,6 +533,7 @@ fn read_ui_raw(ui: &Ui) -> Config {
         interval_minutes: ui.interval.value_as_int() as u64,
         exclude: lines(&ui.excludes),
         exclude_folders: lines(&ui.excluded_folders),
+        language: selected_language(ui),
     }
 }
 fn populate_ui(ui: &Ui, config: &Config) {
@@ -442,4 +545,10 @@ fn populate_ui(ui: &Ui, config: &Config) {
     ui.excluded_folders
         .buffer()
         .set_text(&config.exclude_folders.join("\n"));
+    if selected_language(ui) != config.language {
+        ui.refreshing.set(true);
+        ui.language.set_selected(language_index(config.language));
+        ui.refreshing.set(false);
+        apply_language(ui);
+    }
 }

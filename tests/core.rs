@@ -1,6 +1,9 @@
 use std::path::PathBuf;
 
-use drivemirror::{Config, SyncCommand, SyncRunner};
+use drivemirror::{
+    Config, SyncCommand, SyncRunner,
+    i18n::{Language, Message, tr},
+};
 
 #[test]
 fn defaults_are_conservative() {
@@ -32,6 +35,7 @@ fn validation_rejects_dangerous_destinations_and_short_intervals() {
         local_folder: source.path().to_path_buf(),
         remote: "drive".into(),
         remote_folder: "/".into(),
+        language: Language::En,
         ..Default::default()
     };
     assert!(config.validate().unwrap_err().contains("subfolder"));
@@ -54,6 +58,7 @@ fn command_keeps_arguments_literal_and_never_deletes_excluded_files() {
         interval_minutes: 10,
         exclude: vec!["*.bak; echo nope".into()],
         exclude_folders: vec![".cache/**".into()],
+        language: Language::En,
     };
     let command = SyncCommand::from_config(&config).unwrap();
     assert_eq!(command.program, "rclone");
@@ -76,9 +81,14 @@ fn runner_rejects_a_second_process_and_records_completion() {
         program: "/bin/sh".into(),
         args: vec!["-c".into(), "sleep 0.1; printf synced".into()],
     };
-    runner.start(command.clone()).unwrap();
+    runner.start(command.clone(), Language::En).unwrap();
     assert!(runner.is_running());
-    assert!(runner.start(command).unwrap_err().contains("already"));
+    assert!(
+        runner
+            .start(command, Language::En)
+            .unwrap_err()
+            .contains("already")
+    );
     for _ in 0..50 {
         if !runner.is_running() {
             break;
@@ -123,10 +133,13 @@ fn validation_requires_a_real_absolute_source_and_safe_remote_path() {
 fn missing_executable_has_an_actionable_result() {
     let runner = SyncRunner::default();
     runner
-        .start(SyncCommand {
-            program: "definitely-missing-drivemirror-test".into(),
-            args: vec![],
-        })
+        .start(
+            SyncCommand {
+                program: "definitely-missing-drivemirror-test".into(),
+                args: vec![],
+            },
+            Language::En,
+        )
         .unwrap();
     for _ in 0..50 {
         if !runner.is_running() {
@@ -168,4 +181,81 @@ fn manual_sync_persists_the_selected_config_before_running() {
         .save_for_sync(&config_path, &Config::default())
         .unwrap();
     assert_eq!(Config::load(&config_path).unwrap(), selected);
+}
+
+#[test]
+fn legacy_toml_without_language_loads_as_system() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, "remote = \"gdrive\"\ninterval_minutes = 5\n").unwrap();
+    let config = Config::load(&path).unwrap();
+    assert_eq!(config.language, Language::System);
+    assert_eq!(config.remote, "gdrive");
+}
+
+#[test]
+fn language_is_persisted_by_code_and_invalid_values_fall_back_to_system() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    let config = Config {
+        language: Language::Es,
+        ..Default::default()
+    };
+    config.save(&path).unwrap();
+    assert!(
+        std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("language = \"es\"")
+    );
+    assert_eq!(Config::load(&path).unwrap().language, Language::Es);
+    std::fs::write(&path, "language = \"klingon\"\n").unwrap();
+    assert_eq!(Config::load(&path).unwrap().language, Language::System);
+}
+
+#[test]
+fn system_language_follows_the_locale() {
+    let cases = [
+        ("pt_BR.UTF-8", "pt-BR"),
+        ("pt", "pt-BR"),
+        ("es-MX", "es"),
+        ("es_ES.UTF-8", "es"),
+        ("en_US.UTF-8", "en"),
+        ("fr_FR.UTF-8", "en"),
+        ("C", "en"),
+        ("", "en"),
+    ];
+    for (locale, code) in cases {
+        assert_eq!(Language::System.resolve(locale).code(), code, "{locale}");
+    }
+    assert_eq!(Language::Es.resolve("pt_BR.UTF-8"), Language::Es);
+    assert_eq!(Language::System.code(), "system");
+}
+
+#[test]
+fn messages_exist_in_all_three_languages() {
+    assert_eq!(tr(Language::PtBr, Message::SyncNow), "Sincronizar agora");
+    assert_eq!(tr(Language::En, Message::SyncNow), "Sync now");
+    assert_eq!(tr(Language::Es, Message::SyncNow), "Sincronizar ahora");
+    assert_eq!(tr(Language::PtBr, Message::Quit), "Sair");
+    assert_eq!(tr(Language::En, Message::Quit), "Quit");
+    assert_eq!(tr(Language::Es, Message::Quit), "Salir");
+    for language in [Language::PtBr, Language::En, Language::Es] {
+        assert!(!tr(language, Message::RemoteRootNotAllowed).is_empty());
+    }
+}
+
+#[test]
+fn validation_errors_use_the_configured_language() {
+    let source = tempfile::tempdir().unwrap();
+    let config = Config {
+        local_folder: source.path().to_path_buf(),
+        remote: "drive".into(),
+        remote_folder: "/".into(),
+        language: Language::PtBr,
+        ..Default::default()
+    };
+    assert_eq!(
+        config.validate().unwrap_err(),
+        tr(Language::PtBr, Message::RemoteRootNotAllowed)
+    );
 }

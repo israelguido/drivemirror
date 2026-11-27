@@ -1,8 +1,11 @@
 [Desktop Entry]
 Type=Application
 Name=DriveMirror
+Name[pt_BR]=DriveMirror
+Name[es]=DriveMirror
 Comment=Mirror a local folder to a private rclone remote
 Comment[pt_BR]=Espelhe uma pasta local para um destino privado do rclone
+Comment[es]=Refleja una carpeta local en un destino privado de rclone
 Exec=drivemirror
 Icon=drivemirror
 Terminal=false

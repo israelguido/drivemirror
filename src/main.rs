@@ -2,6 +2,7 @@ mod app;
 mod theme;
 mod tray;
 
+use drivemirror::{Config, default_config_path};
 use gtk::prelude::*;
 
 fn main() -> gtk::glib::ExitCode {
@@ -16,11 +17,21 @@ fn main() -> gtk::glib::ExitCode {
         .build();
     let (sender, receiver) = std::sync::mpsc::channel();
     let receiver = std::sync::Arc::new(std::sync::Mutex::new(receiver));
-    let tray = tray::start(sender.clone());
+    let language = Config::load(&default_config_path())
+        .unwrap_or_default()
+        .language
+        .current();
+    let tray = tray::start(sender.clone(), language);
     let tray_error = tray.as_ref().err().map(|error| error.to_string());
+    let tray = tray.ok();
     application.connect_activate(move |app| {
-        app::activate(app, receiver.clone(), start_hidden, tray_error.clone())
+        app::activate(
+            app,
+            receiver.clone(),
+            start_hidden,
+            tray_error.clone(),
+            tray.clone(),
+        )
     });
-    let _tray = tray.ok();
     application.run_with_args(&gtk_arguments)
 }
