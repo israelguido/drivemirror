@@ -1,0 +1,26 @@
+pkgname=drivemirror
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='Mirror a local folder to a private rclone remote'
+arch=('x86_64' 'aarch64')
+url='https://github.com/israelguido/drivemirror'
+license=('MIT')
+depends=('gtk4' 'rclone' 'xdg-desktop-portal')
+makedepends=('cargo')
+source=()
+sha256sums=()
+
+build() {
+  cd "$startdir/.."
+  cargo build --release --locked --offline
+}
+
+package() {
+  cd "$startdir/.."
+  install -Dm755 target/release/drivemirror "$pkgdir/usr/bin/drivemirror"
+  install -Dm644 assets/drivemirror.svg "$pkgdir/usr/share/icons/hicolor/scalable/apps/drivemirror.svg"
+  install -Dm644 packaging/drivemirror.desktop "$pkgdir/usr/share/applications/drivemirror.desktop"
+  install -Dm644 packaging/drivemirror-autostart.desktop "$pkgdir/etc/xdg/autostart/drivemirror.desktop"
+  install -Dm644 LICENSE "$pkgdir/usr/share/licenses/drivemirror/LICENSE"
+}
+

@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=DriveMirror
+Comment=Mirror a local folder to a private rclone remote
+Comment[pt_BR]=Espelhe uma pasta local para um destino privado do rclone
+Exec=drivemirror
+Icon=drivemirror
+Terminal=false
+Categories=Network;FileTransfer;
+StartupNotify=true
+StartupWMClass=com.github.israelguido.drivemirror
+

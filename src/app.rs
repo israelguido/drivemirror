@@ -106,24 +106,26 @@ pub fn activate(
         #[weak]
         window,
         move |_| {
-            let dialog = gtk::FileDialog::builder()
+            let dialog = gtk::FileChooserNative::builder()
                 .title("Escolha a pasta local")
+                .transient_for(&window)
+                .action(gtk::FileChooserAction::SelectFolder)
+                .accept_label("Escolher")
+                .cancel_label("Cancelar")
                 .build();
-            dialog.select_folder(
-                Some(&window),
-                gio::Cancellable::NONE,
-                glib::clone!(
-                    #[weak]
-                    local,
-                    move |result| {
-                        if let Ok(folder) = result
-                            && let Some(path) = folder.path()
-                        {
-                            local.set_text(&path.to_string_lossy());
-                        }
+            dialog.connect_response(glib::clone!(
+                #[weak]
+                local,
+                move |dialog, response| {
+                    if response == gtk::ResponseType::Accept
+                        && let Some(path) = dialog.file().and_then(|file| file.path())
+                    {
+                        local.set_text(&path.to_string_lossy());
                     }
-                ),
-            );
+                    dialog.destroy();
+                }
+            ));
+            dialog.show();
         }
     ));
 

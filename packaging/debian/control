@@ -1,0 +1,11 @@
+Package: drivemirror
+Version: 0.1.0
+Section: utils
+Priority: optional
+Architecture: amd64
+Maintainer: Israel Guido <israelguido@gmail.com>
+Depends: libgtk-4-1, rclone, xdg-desktop-portal
+Description: Mirror a local folder to a private rclone remote
+ DriveMirror runs rclone sync manually or on a configurable timer and stays
+ available through a StatusNotifierItem tray menu.
+

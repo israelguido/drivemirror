@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=DriveMirror
+Comment=Start DriveMirror in the system tray
+Comment[pt_BR]=Inicia o DriveMirror na bandeja do sistema
+Exec=drivemirror --tray
+Icon=drivemirror
+Terminal=false
+X-GNOME-Autostart-enabled=true
+NoDisplay=true
+

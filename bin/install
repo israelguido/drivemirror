@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+cd "$ROOT/packaging"
+if pacman -Q cargo >/dev/null 2>&1; then
+  exec makepkg -fsi "$@"
+fi
+exec makepkg -dfsi "$@"
+

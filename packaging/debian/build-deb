@@ -1,0 +1,27 @@
+#!/bin/sh
+set -eu
+
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)"
+VERSION="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$ROOT/Cargo.toml" | head -1)"
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+
+cd "$ROOT"
+cargo build --release --locked
+mkdir -p "$WORK/control" "$WORK/root/usr/bin" "$WORK/root/usr/share/applications" \
+  "$WORK/root/usr/share/icons/hicolor/scalable/apps" "$WORK/root/usr/share/licenses/drivemirror" \
+  "$WORK/root/etc/xdg/autostart"
+sed "s/^Version:.*/Version: $VERSION/" packaging/debian/control > "$WORK/control/control"
+install -m755 target/release/drivemirror "$WORK/root/usr/bin/drivemirror"
+install -m644 packaging/drivemirror.desktop "$WORK/root/usr/share/applications/drivemirror.desktop"
+install -m644 packaging/drivemirror-autostart.desktop "$WORK/root/etc/xdg/autostart/drivemirror.desktop"
+install -m644 assets/drivemirror.svg "$WORK/root/usr/share/icons/hicolor/scalable/apps/drivemirror.svg"
+install -m644 LICENSE "$WORK/root/usr/share/licenses/drivemirror/LICENSE"
+printf '2.0\n' > "$WORK/debian-binary"
+tar --owner=0 --group=0 -C "$WORK/control" -cJf "$WORK/control.tar.xz" .
+tar --owner=0 --group=0 -C "$WORK/root" -cJf "$WORK/data.tar.xz" .
+OUTPUT="$ROOT/drivemirror_${VERSION}_amd64.deb"
+rm -f "$OUTPUT"
+ar r "$OUTPUT" "$WORK/debian-binary" "$WORK/control.tar.xz" "$WORK/data.tar.xz"
+echo "Built $OUTPUT"
+
