@@ -1,6 +1,8 @@
 //! Rclone account protocol: literal argv builders and parsers. No process
 //! execution and no GTK here; callers run commands off the GTK thread.
 
+use serde::{Deserialize, Deserializer};
+use serde_json::Value;
 use std::fmt;
 
 const RCLONE: &str = "rclone";
@@ -174,11 +176,18 @@ impl ContinueRequest {
     }
 }
 
-/// `rclone config reconnect` takes `remote:` and has no `--non-interactive`.
+/// Refreshes the OAuth token via the same continuation protocol as create;
+/// `rclone config reconnect` is interactive-only.
 pub fn reconnect_command(name: &str) -> Result<AccountCommand, String> {
     validate_remote_name(name)?;
     Ok(AccountCommand::new(
-        &["config", "reconnect", &format!("{name}:")],
+        &[
+            "config",
+            "update",
+            name,
+            "config_refresh_token=true",
+            "--non-interactive",
+        ],
         None,
     ))
 }
@@ -189,32 +198,49 @@ pub fn delete_command(name: &str) -> Result<AccountCommand, String> {
     Ok(AccountCommand::new(&["config", "delete", name], None))
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct ConfigExample {
+    #[serde(default)]
     pub value: String,
+    #[serde(default)]
     pub help: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct ConfigOption {
+    #[serde(default)]
     pub name: String,
+    #[serde(default)]
     pub help: String,
     /// JSON scalar rendered as rclone expects it back in `--result`.
+    #[serde(default, deserialize_with = "scalar_text")]
     pub default: String,
+    #[serde(default, deserialize_with = "null_as_empty")]
     pub examples: Vec<ConfigExample>,
+    #[serde(default)]
     pub required: bool,
+    #[serde(default)]
     pub is_password: bool,
+    #[serde(default)]
     pub exclusive: bool,
+    #[serde(default, rename = "Type")]
     pub kind: String,
 }
 
 /// One step of `rclone config create/update --non-interactive`. An empty
 /// `state` means the process finished.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub struct ConfigQuestion {
+    #[serde(default)]
     pub state: String,
+    #[serde(default)]
     pub option: Option<ConfigOption>,
+    #[serde(default)]
     pub error: String,
+    #[serde(default)]
     pub result: String,
 }
 
@@ -225,218 +251,20 @@ impl ConfigQuestion {
 
     /// Errors never include the input: rclone output may carry secrets.
     pub fn parse(text: &str) -> Result<Self, String> {
-        let malformed = || "Malformed rclone configuration response".to_string();
-        let mut parser = Parser {
-            bytes: text.as_bytes(),
-            pos: 0,
-        };
-        let value = parser.value().ok_or_else(malformed)?;
-        parser.skip_ws();
-        if parser.pos != parser.bytes.len() {
-            return Err(malformed());
-        }
-        let Json::Obj(_) = value else {
-            return Err(malformed());
-        };
-        let option = match value.get("Option") {
-            Some(option @ Json::Obj(_)) => Some(ConfigOption {
-                name: option.text("Name"),
-                help: option.text("Help"),
-                default: option.text("Default"),
-                examples: match option.get("Examples") {
-                    Some(Json::Arr(items)) => items
-                        .iter()
-                        .map(|item| ConfigExample {
-                            value: item.text("Value"),
-                            help: item.text("Help"),
-                        })
-                        .collect(),
-                    _ => Vec::new(),
-                },
-                required: option.flag("Required"),
-                is_password: option.flag("IsPassword"),
-                exclusive: option.flag("Exclusive"),
-                kind: option.text("Type"),
-            }),
-            _ => None,
-        };
-        Ok(Self {
-            state: value.text("State"),
-            option,
-            error: value.text("Error"),
-            result: value.text("Result"),
-        })
+        serde_json::from_str(text).map_err(|_| "Malformed rclone configuration response".into())
     }
 }
 
-// shortcut: minimal JSON reader (no serde_json dependency allowed); numbers kept as raw text.
-enum Json {
-    Null,
-    Bool(bool),
-    Num(String),
-    Str(String),
-    Arr(Vec<Json>),
-    Obj(Vec<(String, Json)>),
+fn scalar_text<'de, D: Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    Ok(match Value::deserialize(deserializer)? {
+        Value::String(text) => text,
+        Value::Null => String::new(),
+        other => other.to_string(),
+    })
 }
 
-impl Json {
-    fn get(&self, key: &str) -> Option<&Json> {
-        match self {
-            Json::Obj(fields) => fields.iter().find(|(k, _)| k == key).map(|(_, v)| v),
-            _ => None,
-        }
-    }
-
-    fn text(&self, key: &str) -> String {
-        match self.get(key) {
-            Some(Json::Str(s) | Json::Num(s)) => s.clone(),
-            Some(Json::Bool(b)) => b.to_string(),
-            _ => String::new(),
-        }
-    }
-
-    fn flag(&self, key: &str) -> bool {
-        matches!(self.get(key), Some(Json::Bool(true)))
-    }
-}
-
-struct Parser<'a> {
-    bytes: &'a [u8],
-    pos: usize,
-}
-
-impl Parser<'_> {
-    fn skip_ws(&mut self) {
-        while self
-            .bytes
-            .get(self.pos)
-            .is_some_and(u8::is_ascii_whitespace)
-        {
-            self.pos += 1;
-        }
-    }
-
-    fn eat(&mut self, byte: u8) -> bool {
-        self.skip_ws();
-        let found = self.bytes.get(self.pos) == Some(&byte);
-        if found {
-            self.pos += 1;
-        }
-        found
-    }
-
-    fn literal(&mut self, word: &str, value: Json) -> Option<Json> {
-        let end = self.pos + word.len();
-        (self.bytes.get(self.pos..end)? == word.as_bytes()).then(|| {
-            self.pos = end;
-            value
-        })
-    }
-
-    fn value(&mut self) -> Option<Json> {
-        self.skip_ws();
-        match *self.bytes.get(self.pos)? {
-            b'{' => {
-                self.pos += 1;
-                let mut fields = Vec::new();
-                // Trailing commas are tolerated, as in rclone's documented example.
-                while !self.eat(b'}') {
-                    self.skip_ws();
-                    let key = self.string()?;
-                    if !self.eat(b':') {
-                        return None;
-                    }
-                    fields.push((key, self.value()?));
-                    if !self.eat(b',') && self.bytes.get(self.pos) != Some(&b'}') {
-                        return None;
-                    }
-                }
-                Some(Json::Obj(fields))
-            }
-            b'[' => {
-                self.pos += 1;
-                let mut items = Vec::new();
-                while !self.eat(b']') {
-                    items.push(self.value()?);
-                    if !self.eat(b',') && self.bytes.get(self.pos) != Some(&b']') {
-                        return None;
-                    }
-                }
-                Some(Json::Arr(items))
-            }
-            b'"' => self.string().map(Json::Str),
-            b't' => self.literal("true", Json::Bool(true)),
-            b'f' => self.literal("false", Json::Bool(false)),
-            b'n' => self.literal("null", Json::Null),
-            b'-' | b'0'..=b'9' => {
-                let start = self.pos;
-                while self
-                    .bytes
-                    .get(self.pos)
-                    .is_some_and(|b| b.is_ascii_digit() || b"+-.eE".contains(b))
-                {
-                    self.pos += 1;
-                }
-                let raw = std::str::from_utf8(&self.bytes[start..self.pos]).ok()?;
-                raw.parse::<f64>().ok()?;
-                Some(Json::Num(raw.into()))
-            }
-            _ => None,
-        }
-    }
-
-    fn string(&mut self) -> Option<String> {
-        if self.bytes.get(self.pos) != Some(&b'"') {
-            return None;
-        }
-        self.pos += 1;
-        let mut out = Vec::new();
-        loop {
-            let byte = *self.bytes.get(self.pos)?;
-            self.pos += 1;
-            match byte {
-                b'"' => return String::from_utf8(out).ok(),
-                b'\\' => {
-                    let escaped = *self.bytes.get(self.pos)?;
-                    self.pos += 1;
-                    let c = match escaped {
-                        b'"' => '"',
-                        b'\\' => '\\',
-                        b'/' => '/',
-                        b'b' => '\u{8}',
-                        b'f' => '\u{c}',
-                        b'n' => '\n',
-                        b'r' => '\r',
-                        b't' => '\t',
-                        b'u' => {
-                            let high = self.hex4()?;
-                            if (0xD800..0xDC00).contains(&high) {
-                                if self.bytes.get(self.pos..self.pos + 2)? != b"\\u" {
-                                    return None;
-                                }
-                                self.pos += 2;
-                                let low = self.hex4()?;
-                                if !(0xDC00..0xE000).contains(&low) {
-                                    return None;
-                                }
-                                char::from_u32(0x10000 + ((high - 0xD800) << 10) + (low - 0xDC00))?
-                            } else {
-                                char::from_u32(high)?
-                            }
-                        }
-                        _ => return None,
-                    };
-                    out.extend_from_slice(c.encode_utf8(&mut [0; 4]).as_bytes());
-                }
-                0..0x20 => return None,
-                _ => out.push(byte),
-            }
-        }
-    }
-
-    fn hex4(&mut self) -> Option<u32> {
-        let digits = std::str::from_utf8(self.bytes.get(self.pos..self.pos + 4)?).ok()?;
-        self.pos += 4;
-        u32::from_str_radix(digits, 16).ok()
-    }
+fn null_as_empty<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<ConfigExample>, D::Error> {
+    Ok(Option::deserialize(deserializer)?.unwrap_or_default())
 }

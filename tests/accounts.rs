@@ -32,7 +32,7 @@ fn lists_remotes_from_long_output() {
 
 #[test]
 fn parses_documented_question_json() {
-    // Example from `rclone config create --help`, including its trailing commas.
+    // Example from `rclone config create --help` (as valid JSON, which rclone emits).
     let json = r#"{
       "State": "*oauth-islocal,teamdrive,,",
       "Option": {
@@ -46,7 +46,7 @@ fn parses_documented_question_json() {
         "Exclusive": true,
         "Hide": 0
       },
-      "Error": "",
+      "Error": ""
     }"#;
     let question = ConfigQuestion::parse(json).unwrap();
     assert_eq!(question.state, "*oauth-islocal,teamdrive,,");
@@ -65,10 +65,12 @@ fn parses_documented_question_json() {
 #[test]
 fn parses_final_answer_and_error() {
     let question =
-        ConfigQuestion::parse(r#"{"State":"","Option":null,"Error":"bad \"id\"","Result":"ok"}"#)
+        ConfigQuestion::parse(r#"{"State":"","Option":{"Name":"n","Default":null,"Examples":null},"Error":"bad \"id\"","Result":"ok"}"#)
             .unwrap();
     assert!(question.is_done());
-    assert!(question.option.is_none());
+    let option = question.option.unwrap();
+    assert_eq!(option.default, "");
+    assert!(option.examples.is_empty());
     assert_eq!(question.error, "bad \"id\"");
     assert_eq!(question.result, "ok");
 }
@@ -197,7 +199,16 @@ fn password_continuation_is_redacted_in_debug() {
 fn reconnect_and_delete_commands() {
     let reconnect = reconnect_command("my drive").unwrap();
     assert_eq!(reconnect.program, "rclone");
-    assert_eq!(reconnect.args, ["config", "reconnect", "my drive:"]);
+    assert_eq!(
+        reconnect.args,
+        [
+            "config",
+            "update",
+            "my drive",
+            "config_refresh_token=true",
+            "--non-interactive"
+        ]
+    );
     let delete = delete_command("my drive").unwrap();
     assert_eq!(delete.program, "rclone");
     assert_eq!(delete.args, ["config", "delete", "my drive"]);
