@@ -1,4 +1,7 @@
-use std::{fs, path::{Path, PathBuf}};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
@@ -21,10 +24,22 @@ impl Default for Config {
             remote: String::new(),
             remote_folder: String::new(),
             interval_minutes: 10,
-            exclude: vec![".DS_Store", "Thumbs.db", "desktop.ini", "*~", "*.swp", "*.tmp", "*.bak"]
-                .into_iter().map(String::from).collect(),
+            exclude: vec![
+                ".DS_Store",
+                "Thumbs.db",
+                "desktop.ini",
+                "*~",
+                "*.swp",
+                "*.tmp",
+                "*.bak",
+            ]
+            .into_iter()
+            .map(String::from)
+            .collect(),
             exclude_folders: vec![".Trash-*/**", ".cache/**"]
-                .into_iter().map(String::from).collect(),
+                .into_iter()
+                .map(String::from)
+                .collect(),
         }
     }
 }
@@ -34,16 +49,18 @@ impl Config {
         if !path.exists() {
             return Ok(Self::default());
         }
-        let text = fs::read_to_string(path).map_err(|error| format!("Could not read config: {error}"))?;
+        let text =
+            fs::read_to_string(path).map_err(|error| format!("Could not read config: {error}"))?;
         toml::from_str(&text).map_err(|error| format!("Invalid config: {error}"))
     }
 
     pub fn save(&self, path: &Path) -> Result<(), String> {
-        self.validate()?;
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent).map_err(|error| format!("Could not create config folder: {error}"))?;
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("Could not create config folder: {error}"))?;
         }
-        let text = toml::to_string_pretty(self).map_err(|error| format!("Could not encode config: {error}"))?;
+        let text = toml::to_string_pretty(self)
+            .map_err(|error| format!("Could not encode config: {error}"))?;
         let temporary = path.with_extension("toml.tmp");
         fs::write(&temporary, text).map_err(|error| format!("Could not write config: {error}"))?;
         fs::rename(&temporary, path).map_err(|error| format!("Could not replace config: {error}"))
@@ -72,4 +89,3 @@ pub fn default_config_path() -> PathBuf {
         .map(|dirs| dirs.config_dir().join("config.toml"))
         .unwrap_or_else(|| PathBuf::from("config.toml"))
 }
-

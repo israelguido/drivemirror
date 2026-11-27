@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use drivemirror::{Config, SyncCommand};
+use drivemirror::{Config, SyncCommand, SyncRunner};
 
 #[test]
 fn defaults_are_conservative() {
@@ -15,20 +15,24 @@ fn defaults_are_conservative() {
 fn config_round_trips_toml() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
-    let mut config = Config::default();
-    config.local_folder = PathBuf::from("/tmp/source");
-    config.remote = "drive".into();
-    config.remote_folder = "Backup/My files".into();
+    let config = Config {
+        local_folder: PathBuf::from("/tmp/source"),
+        remote: "drive".into(),
+        remote_folder: "Backup/My files".into(),
+        ..Default::default()
+    };
     config.save(&path).unwrap();
     assert_eq!(Config::load(&path).unwrap(), config);
 }
 
 #[test]
 fn validation_rejects_dangerous_destinations_and_short_intervals() {
-    let mut config = Config::default();
-    config.local_folder = PathBuf::from("/tmp/source");
-    config.remote = "drive".into();
-    config.remote_folder = "/".into();
+    let mut config = Config {
+        local_folder: PathBuf::from("/tmp/source"),
+        remote: "drive".into(),
+        remote_folder: "/".into(),
+        ..Default::default()
+    };
     assert!(config.validate().unwrap_err().contains("subfolder"));
     config.remote_folder = "Backup".into();
     config.interval_minutes = 0;
@@ -47,8 +51,41 @@ fn command_keeps_arguments_literal_and_never_deletes_excluded_files() {
     };
     let command = SyncCommand::from_config(&config).unwrap();
     assert_eq!(command.program, "rclone");
-    assert_eq!(&command.args[..3], &["sync", "/tmp/My folder; touch /tmp/nope", "drive:Private backup"]);
-    assert!(command.args.windows(2).any(|a| a == ["--exclude", "*.bak; echo nope"]));
+    assert_eq!(
+        &command.args[..3],
+        &[
+            "sync",
+            "/tmp/My folder; touch /tmp/nope",
+            "drive:Private backup"
+        ]
+    );
+    assert!(
+        command
+            .args
+            .windows(2)
+            .any(|a| a == ["--exclude", "*.bak; echo nope"])
+    );
     assert!(!command.args.iter().any(|arg| arg == "--delete-excluded"));
 }
 
+#[test]
+fn runner_rejects_a_second_process_and_records_completion() {
+    let runner = SyncRunner::default();
+    let command = SyncCommand {
+        program: "/bin/sh".into(),
+        args: vec!["-c".into(), "sleep 0.1; printf synced".into()],
+    };
+    runner.start(command.clone()).unwrap();
+    assert!(runner.is_running());
+    assert!(runner.start(command).unwrap_err().contains("already"));
+    for _ in 0..50 {
+        if !runner.is_running() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    assert!(!runner.is_running());
+    let result = runner.last_result().unwrap();
+    assert!(result.success);
+    assert_eq!(result.message, "synced");
+}
