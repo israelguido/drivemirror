@@ -37,6 +37,8 @@ destino, pois o app nunca usa `--delete-excluded`.
 
 No Omarchy/Arch, instale com `./bin/install`. Em Debian, Ubuntu ou Pop!_OS,
 gere o pacote com `./packaging/debian/build-deb` e instale o `.deb` resultante.
+Gere o `.deb` na distribuição em que ele será usado, para vinculá-lo às versões
+de GTK e glibc disponíveis naquele sistema.
 
 ## Segurança
 

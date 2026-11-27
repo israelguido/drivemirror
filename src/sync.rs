@@ -57,9 +57,16 @@ impl SyncRunner {
                         message: String::from_utf8_lossy(text).trim().to_string(),
                     }
                 }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => SyncResult {
+                    success: false,
+                    message: format!(
+                        "{} was not found; install it or check PATH",
+                        command.program
+                    ),
+                },
                 Err(error) => SyncResult {
                     success: false,
-                    message: error.to_string(),
+                    message: format!("Could not start {}: {error}", command.program),
                 },
             };
             if let Ok(mut value) = result.lock() {

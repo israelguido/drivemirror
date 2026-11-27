@@ -66,19 +66,43 @@ impl Config {
         fs::rename(&temporary, path).map_err(|error| format!("Could not replace config: {error}"))
     }
 
-    pub fn validate(&self) -> Result<(), String> {
-        if self.local_folder.as_os_str().is_empty() {
-            return Err("Choose a local folder".into());
+    pub fn save_if_unchanged(&self, path: &Path, baseline: &Self) -> Result<(), String> {
+        if path.exists() {
+            let current = Self::load(path)?;
+            if &current != baseline {
+                return Err("The config changed externally; review it before saving".into());
+            }
         }
-        if self.remote.trim().is_empty() || self.remote.contains(':') {
+        self.save(path)
+    }
+
+    pub fn validate(&self) -> Result<(), String> {
+        if !self.local_folder.is_absolute() || !self.local_folder.is_dir() {
+            return Err("Choose an existing absolute local folder".into());
+        }
+        let remote = self.remote.trim();
+        if remote.is_empty()
+            || remote == "."
+            || remote == ".."
+            || !remote.chars().all(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '_' | '-' | '.' | ' ')
+            })
+        {
             return Err("Choose a valid rclone remote name".into());
         }
         let folder = self.remote_folder.trim_matches('/').trim();
-        if folder.is_empty() || folder == "." {
+        if folder.is_empty()
+            || folder
+                .split('/')
+                .any(|component| component.is_empty() || matches!(component, "." | ".."))
+        {
             return Err("Choose a remote subfolder; the Drive root is not allowed".into());
         }
         if self.interval_minutes < 1 {
             return Err("The interval must be at least one minute".into());
+        }
+        if self.interval_minutes > 1440 {
+            return Err("The interval cannot exceed 24 hours".into());
         }
         Ok(())
     }

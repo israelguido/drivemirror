@@ -27,8 +27,9 @@ fn config_round_trips_toml() {
 
 #[test]
 fn validation_rejects_dangerous_destinations_and_short_intervals() {
+    let source = tempfile::tempdir().unwrap();
     let mut config = Config {
-        local_folder: PathBuf::from("/tmp/source"),
+        local_folder: source.path().to_path_buf(),
         remote: "drive".into(),
         remote_folder: "/".into(),
         ..Default::default()
@@ -37,12 +38,17 @@ fn validation_rejects_dangerous_destinations_and_short_intervals() {
     config.remote_folder = "Backup".into();
     config.interval_minutes = 0;
     assert!(config.validate().unwrap_err().contains("one minute"));
+    config.interval_minutes = 1441;
+    assert!(config.validate().unwrap_err().contains("24 hours"));
 }
 
 #[test]
 fn command_keeps_arguments_literal_and_never_deletes_excluded_files() {
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("My folder; touch nope");
+    std::fs::create_dir(&source).unwrap();
     let config = Config {
-        local_folder: PathBuf::from("/tmp/My folder; touch /tmp/nope"),
+        local_folder: source.clone(),
         remote: "drive".into(),
         remote_folder: "Private backup".into(),
         interval_minutes: 10,
@@ -51,14 +57,9 @@ fn command_keeps_arguments_literal_and_never_deletes_excluded_files() {
     };
     let command = SyncCommand::from_config(&config).unwrap();
     assert_eq!(command.program, "rclone");
-    assert_eq!(
-        &command.args[..3],
-        &[
-            "sync",
-            "/tmp/My folder; touch /tmp/nope",
-            "drive:Private backup"
-        ]
-    );
+    assert_eq!(command.args[0], "sync");
+    assert_eq!(command.args[1], source.to_string_lossy());
+    assert_eq!(command.args[2], "drive:Private backup");
     assert!(
         command
             .args
@@ -88,4 +89,67 @@ fn runner_rejects_a_second_process_and_records_completion() {
     let result = runner.last_result().unwrap();
     assert!(result.success);
     assert_eq!(result.message, "synced");
+}
+
+#[test]
+fn validation_requires_a_real_absolute_source_and_safe_remote_path() {
+    let source = tempfile::tempdir().unwrap();
+    let valid = Config {
+        local_folder: source.path().to_path_buf(),
+        remote: "gdrive".into(),
+        remote_folder: "Backup/Documents".into(),
+        ..Default::default()
+    };
+    assert!(valid.validate().is_ok());
+
+    for local in [PathBuf::from("relative"), source.path().join("missing")] {
+        let mut config = valid.clone();
+        config.local_folder = local;
+        assert!(config.validate().is_err());
+    }
+    for remote in ["../drive", "drive/path", ":drive"] {
+        let mut config = valid.clone();
+        config.remote = remote.into();
+        assert!(config.validate().is_err());
+    }
+    for folder in ["..", "Backup/../Other", "Backup/./Other", "//"] {
+        let mut config = valid.clone();
+        config.remote_folder = folder.into();
+        assert!(config.validate().is_err());
+    }
+}
+
+#[test]
+fn missing_executable_has_an_actionable_result() {
+    let runner = SyncRunner::default();
+    runner
+        .start(SyncCommand {
+            program: "definitely-missing-drivemirror-test".into(),
+            args: vec![],
+        })
+        .unwrap();
+    for _ in 0..50 {
+        if !runner.is_running() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let result = runner.last_result().unwrap();
+    assert!(!result.success);
+    assert!(
+        result
+            .message
+            .contains("definitely-missing-drivemirror-test")
+    );
+    assert!(result.message.contains("install"));
+}
+
+#[test]
+fn guarded_save_preserves_invalid_external_edits() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("config.toml");
+    std::fs::write(&path, b"not = [valid").unwrap();
+    let config = Config::default();
+    assert!(config.save_if_unchanged(&path, &Config::default()).is_err());
+    assert_eq!(std::fs::read(&path).unwrap(), b"not = [valid");
 }

@@ -1,5 +1,5 @@
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     path::PathBuf,
     rc::Rc,
     sync::{Arc, Mutex},
@@ -26,6 +26,7 @@ pub fn activate(
     app: &gtk::Application,
     receiver: Arc<Mutex<std::sync::mpsc::Receiver<Action>>>,
     start_hidden: bool,
+    tray_error: Option<String>,
 ) {
     if !app.windows().is_empty() {
         app.windows()[0].present();
@@ -38,6 +39,7 @@ pub fn activate(
     let config = Arc::new(Mutex::new(initial.clone()));
     let runner = SyncRunner::default();
     let last_sync = Rc::new(RefCell::new(Instant::now()));
+    let quit_requested = Rc::new(Cell::new(false));
     let window = gtk::ApplicationWindow::builder()
         .application(app)
         .title("DriveMirror")
@@ -53,6 +55,11 @@ pub fn activate(
     });
 
     let ui = Rc::new(build_ui(&initial));
+    if let Some(error) = &tray_error {
+        ui.status.set_text(&format!(
+            "Bandeja indisponível: {error}. Mantenha esta janela aberta para controlar o app."
+        ));
+    }
     let root = gtk::Box::new(gtk::Orientation::Vertical, 14);
     root.set_margin_top(22);
     root.set_margin_bottom(22);
@@ -102,9 +109,12 @@ pub fn activate(
     window.set_child(Some(&root));
 
     let local = ui.local.clone();
+    let chooser = Rc::new(RefCell::new(None::<gtk::FileChooserNative>));
     choose.connect_clicked(glib::clone!(
         #[weak]
         window,
+        #[strong]
+        chooser,
         move |_| {
             let dialog = gtk::FileChooserNative::builder()
                 .title("Escolha a pasta local")
@@ -116,6 +126,8 @@ pub fn activate(
             dialog.connect_response(glib::clone!(
                 #[weak]
                 local,
+                #[strong]
+                chooser,
                 move |dialog, response| {
                     if response == gtk::ResponseType::Accept
                         && let Some(path) = dialog.file().and_then(|file| file.path())
@@ -123,8 +135,10 @@ pub fn activate(
                         local.set_text(&path.to_string_lossy());
                     }
                     dialog.destroy();
+                    chooser.borrow_mut().take();
                 }
             ));
+            *chooser.borrow_mut() = Some(dialog.clone());
             dialog.show();
         }
     ));
@@ -140,7 +154,11 @@ pub fn activate(
         last_sync,
         move |_| {
             match read_ui(&ui).and_then(|value| {
-                value.save(&config_path)?;
+                let baseline = config
+                    .lock()
+                    .map_err(|_| "Configuração indisponível")?
+                    .clone();
+                value.save_if_unchanged(&config_path, &baseline)?;
                 *config.lock().map_err(|_| "Configuração indisponível")? = value;
                 Ok(())
             }) {
@@ -192,6 +210,18 @@ pub fn activate(
                 value.validate()?;
                 Ok(value)
             });
+            if let Ok(saved) = &loaded
+                && read_ui_raw(&ui) != *saved
+            {
+                populate_ui(&ui, saved);
+                if let Ok(mut current) = config.lock() {
+                    *current = saved.clone();
+                }
+                ui.status.set_text(
+                    "A configuração salva mudou. Confira o destino exibido e sincronize novamente.",
+                );
+                return;
+            }
             match loaded
                 .and_then(|value| {
                     *config.lock().map_err(|_| "Configuração indisponível")? = value.clone();
@@ -230,11 +260,19 @@ pub fn activate(
             window,
             #[strong]
             app,
+            #[strong]
+            quit_requested,
             move || {
                 while let Ok(action) = receiver.lock().expect("tray receiver").try_recv() {
                     match action {
                         Action::Show => window.present(),
                         Action::Sync => run_sync(),
+                        Action::Quit if runner.is_running() => {
+                            quit_requested.set(true);
+                            ui.status.set_text(
+                                "Aguardando a sincronização terminar para sair com segurança…",
+                            );
+                        }
                         Action::Quit => app.quit(),
                     }
                 }
@@ -252,6 +290,10 @@ pub fn activate(
                         };
                         ui.status.set_text(&message);
                         *last_sync.borrow_mut() = Instant::now();
+                        if quit_requested.get() {
+                            app.quit();
+                            return glib::ControlFlow::Break;
+                        }
                     }
                 }
                 let minutes = config.lock().map(|c| c.interval_minutes).unwrap_or(10);
@@ -275,6 +317,8 @@ pub fn activate(
             config_path,
             #[strong]
             config_status,
+            #[strong]
+            ui,
             move || {
                 theme::apply();
                 match Config::load(&config_path).and_then(|value| {
@@ -283,7 +327,14 @@ pub fn activate(
                 }) {
                     Ok(value) => {
                         if let Ok(mut current) = config.lock() {
-                            *current = value;
+                            if read_ui_raw(&ui) == *current {
+                                populate_ui(&ui, &value);
+                                *current = value;
+                            } else if *current != value {
+                                config_status.set_text(
+                                    "Há alterações não salvas e o arquivo mudou externamente; revise antes de sincronizar.",
+                                );
+                            }
                         }
                     }
                     Err(error) if config_path.exists() => config_status.set_text(&error),
@@ -293,7 +344,7 @@ pub fn activate(
             }
         ),
     );
-    if !start_hidden {
+    if !start_hidden || tray_error.is_some() {
         window.present();
     }
 }
@@ -362,14 +413,27 @@ fn lines(view: &gtk::TextView) -> Vec<String> {
         .collect()
 }
 fn read_ui(ui: &Ui) -> Result<Config, String> {
-    let value = Config {
+    let value = read_ui_raw(ui);
+    value.validate()?;
+    Ok(value)
+}
+fn read_ui_raw(ui: &Ui) -> Config {
+    Config {
         local_folder: PathBuf::from(ui.local.text().as_str()),
         remote: ui.remote.text().to_string(),
         remote_folder: ui.remote_folder.text().to_string(),
         interval_minutes: ui.interval.value_as_int() as u64,
         exclude: lines(&ui.excludes),
         exclude_folders: lines(&ui.excluded_folders),
-    };
-    value.validate()?;
-    Ok(value)
+    }
+}
+fn populate_ui(ui: &Ui, config: &Config) {
+    ui.local.set_text(&config.local_folder.to_string_lossy());
+    ui.remote.set_text(&config.remote);
+    ui.remote_folder.set_text(&config.remote_folder);
+    ui.interval.set_value(config.interval_minutes as f64);
+    ui.excludes.buffer().set_text(&config.exclude.join("\n"));
+    ui.excluded_folders
+        .buffer()
+        .set_text(&config.exclude_folders.join("\n"));
 }

@@ -62,7 +62,5 @@ impl Tray for DriveMirrorTray {
 pub fn start(
     sender: std::sync::mpsc::Sender<Action>,
 ) -> Result<Handle<DriveMirrorTray>, ksni::Error> {
-    DriveMirrorTray { sender }
-        .assume_sni_available(true)
-        .spawn()
+    DriveMirrorTray { sender }.spawn()
 }
