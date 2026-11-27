@@ -98,14 +98,7 @@ impl Config {
         if !self.local_folder.is_absolute() || !self.local_folder.is_dir() {
             return fail(Message::InvalidLocalFolder);
         }
-        let remote = self.remote.trim();
-        if remote.is_empty()
-            || remote == "."
-            || remote == ".."
-            || !remote.chars().all(|character| {
-                character.is_ascii_alphanumeric() || matches!(character, '_' | '-' | '.' | ' ')
-            })
-        {
+        if crate::accounts::validate_remote_name(self.remote.trim()).is_err() {
             return fail(Message::InvalidRemote);
         }
         let folder = self.remote_folder.trim_matches('/').trim();

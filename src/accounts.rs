@@ -8,20 +8,20 @@ use std::fmt;
 const RCLONE: &str = "rclone";
 const REDACTED: &str = "<redacted>";
 
-/// A literal program + argv. `Debug` redacts the secret argument, if any.
+/// A literal program + argv. `Debug` redacts the secret arguments.
 #[derive(Clone, PartialEq, Eq)]
 pub struct AccountCommand {
     pub program: String,
     pub args: Vec<String>,
-    secret_index: Option<usize>,
+    secret_indices: Vec<usize>,
 }
 
 impl AccountCommand {
-    fn new(args: &[&str], secret_index: Option<usize>) -> Self {
+    fn new(args: &[&str], secret_indices: Vec<usize>) -> Self {
         Self {
             program: RCLONE.into(),
             args: args.iter().map(|arg| arg.to_string()).collect(),
-            secret_index,
+            secret_indices,
         }
     }
 }
@@ -33,7 +33,7 @@ impl fmt::Debug for AccountCommand {
             .iter()
             .enumerate()
             .map(|(i, arg)| {
-                if Some(i) == self.secret_index {
+                if self.secret_indices.contains(&i) {
                     REDACTED
                 } else {
                     arg
@@ -54,10 +54,13 @@ pub struct Remote {
 }
 
 /// Rclone's remote-name charset: letters, digits, `_ . + @ -` and inner spaces;
-/// it may not start with `-` or a space nor end with a space.
+/// it may not start with `-` or a space nor end with a space. Shared with
+/// `Config::validate` so a remote created here is accepted for sync.
 pub fn validate_remote_name(name: &str) -> Result<(), String> {
     let allowed = |c: char| c.is_alphanumeric() || "_.+@- ".contains(c);
     if name.is_empty()
+        || name == "."
+        || name == ".."
         || name.starts_with(['-', ' '])
         || name.ends_with(' ')
         || !name.chars().all(allowed)
@@ -75,7 +78,7 @@ fn validate_value(value: &str, label: &str) -> Result<(), String> {
 }
 
 pub fn list_remotes_command() -> AccountCommand {
-    AccountCommand::new(&["listremotes", "--long"], None)
+    AccountCommand::new(&["listremotes", "--long"], vec![])
 }
 
 /// Parses `rclone listremotes --long` (`name:  type  description`). It never
@@ -112,36 +115,39 @@ impl fmt::Debug for CreateDriveRequest {
 }
 
 impl CreateDriveRequest {
-    pub fn command(&self) -> Result<AccountCommand, String> {
+    /// Config pairs sent on create and repeated on every `--continue`, as
+    /// `rclone config create --help` requires. The secret is the 4th element.
+    fn pairs(&self) -> Result<[&str; 6], String> {
         validate_remote_name(&self.name)?;
         validate_value(&self.client_id, "Client ID")?;
         validate_value(&self.client_secret, "Client Secret")?;
-        Ok(AccountCommand::new(
-            &[
-                "config",
-                "create",
-                &self.name,
-                "drive",
-                "client_id",
-                &self.client_id,
-                "client_secret",
-                &self.client_secret,
-                "scope",
-                "drive",
-                "--non-interactive",
-            ],
-            Some(7),
-        ))
+        Ok([
+            "client_id",
+            &self.client_id,
+            "client_secret",
+            &self.client_secret,
+            "scope",
+            "drive",
+        ])
+    }
+
+    pub fn command(&self) -> Result<AccountCommand, String> {
+        let mut args = vec!["config", "create", &self.name, "drive"];
+        args.extend(self.pairs()?);
+        args.push("--non-interactive");
+        Ok(AccountCommand::new(&args, vec![7]))
     }
 }
 
-/// Answer to a `ConfigQuestion`. Set `secret` when the option `is_password`.
+/// Answer to a pending `ConfigQuestion`; build it with `answer`, which marks
+/// the result secret when the option is a password.
 #[derive(Clone, PartialEq, Eq)]
 pub struct ContinueRequest {
-    pub name: String,
-    pub state: String,
-    pub result: String,
-    pub secret: bool,
+    name: String,
+    creation: Option<CreateDriveRequest>,
+    state: String,
+    result: String,
+    secret: bool,
 }
 
 impl fmt::Debug for ContinueRequest {
@@ -149,30 +155,60 @@ impl fmt::Debug for ContinueRequest {
         let result: &str = if self.secret { REDACTED } else { &self.result };
         f.debug_struct("ContinueRequest")
             .field("name", &self.name)
+            .field("creation", &self.creation)
             .field("state", &self.state)
             .field("result", &result)
-            .field("secret", &self.secret)
             .finish()
     }
 }
 
 impl ContinueRequest {
+    /// `creation` is the request that started this flow (None for reconnect,
+    /// whose values are already in rclone.conf).
+    pub fn answer(
+        name: &str,
+        creation: Option<&CreateDriveRequest>,
+        question: &ConfigQuestion,
+        result: &str,
+    ) -> Result<Self, String> {
+        validate_remote_name(name)?;
+        if question.is_done() {
+            return Err("No pending rclone question".into());
+        }
+        if creation.is_some_and(|creation| creation.name != name) {
+            return Err("Remote name does not match the account being created".into());
+        }
+        Ok(Self {
+            name: name.into(),
+            creation: creation.cloned(),
+            state: question.state.clone(),
+            result: result.into(),
+            secret: question
+                .option
+                .as_ref()
+                .is_some_and(|option| option.is_password),
+        })
+    }
+
     pub fn command(&self) -> Result<AccountCommand, String> {
-        validate_remote_name(&self.name)?;
-        Ok(AccountCommand::new(
-            &[
-                "config",
-                "update",
-                &self.name,
-                "--continue",
-                "--state",
-                &self.state,
-                "--result",
-                &self.result,
-                "--non-interactive",
-            ],
-            self.secret.then_some(7),
-        ))
+        let mut args = vec!["config", "update", &self.name];
+        let mut secret_indices = Vec::new();
+        if let Some(creation) = &self.creation {
+            args.extend(creation.pairs()?);
+            secret_indices.push(6);
+        }
+        args.extend([
+            "--continue",
+            "--state",
+            &self.state,
+            "--result",
+            &self.result,
+        ]);
+        if self.secret {
+            secret_indices.push(args.len() - 1);
+        }
+        args.push("--non-interactive");
+        Ok(AccountCommand::new(&args, secret_indices))
     }
 }
 
@@ -188,14 +224,14 @@ pub fn reconnect_command(name: &str) -> Result<AccountCommand, String> {
             "config_refresh_token=true",
             "--non-interactive",
         ],
-        None,
+        vec![],
     ))
 }
 
 /// Removes the remote from rclone's config only; Drive files are untouched.
 pub fn delete_command(name: &str) -> Result<AccountCommand, String> {
     validate_remote_name(name)?;
-    Ok(AccountCommand::new(&["config", "delete", name], None))
+    Ok(AccountCommand::new(&["config", "delete", name], vec![]))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -207,7 +243,7 @@ pub struct ConfigExample {
     pub help: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct ConfigOption {
     #[serde(default)]
@@ -231,10 +267,9 @@ pub struct ConfigOption {
 
 /// One step of `rclone config create/update --non-interactive`. An empty
 /// `state` means the process finished.
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub struct ConfigQuestion {
-    #[serde(default)]
     pub state: String,
     #[serde(default)]
     pub option: Option<ConfigOption>,
@@ -242,6 +277,37 @@ pub struct ConfigQuestion {
     pub error: String,
     #[serde(default)]
     pub result: String,
+}
+
+impl fmt::Debug for ConfigOption {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let default: &str = if self.is_password {
+            REDACTED
+        } else {
+            &self.default
+        };
+        f.debug_struct("ConfigOption")
+            .field("name", &self.name)
+            .field("default", &default)
+            .field("examples", &self.examples)
+            .field("required", &self.required)
+            .field("is_password", &self.is_password)
+            .field("exclusive", &self.exclusive)
+            .field("kind", &self.kind)
+            .finish_non_exhaustive()
+    }
+}
+
+/// `result` may carry config values, so it is always redacted.
+impl fmt::Debug for ConfigQuestion {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ConfigQuestion")
+            .field("state", &self.state)
+            .field("option", &self.option)
+            .field("error", &self.error)
+            .field("result", &REDACTED)
+            .finish()
+    }
 }
 
 impl ConfigQuestion {
