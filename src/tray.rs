@@ -8,6 +8,7 @@ use ksni::{
 #[derive(Debug, Clone, Copy)]
 pub enum Action {
     Show,
+    TogglePanel,
     Sync,
     Quit,
 }
@@ -28,12 +29,12 @@ impl Tray for DriveMirrorTray {
         "drivemirror".into()
     }
     fn activate(&mut self, _x: i32, _y: i32) {
-        let _ = self.sender.send(Action::Show);
+        let _ = self.sender.send(Action::TogglePanel);
     }
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
         vec![
             StandardItem {
-                label: tr(self.language, Message::OpenApp).into(),
+                label: tr(self.language, Message::Settings).into(),
                 activate: Box::new(|tray: &mut Self| {
                     let _ = tray.sender.send(Action::Show);
                 }),

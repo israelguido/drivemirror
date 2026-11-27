@@ -145,6 +145,12 @@ pub enum Message {
     AnswerRequired,
     AnswerNotAnOption,
     RemoteMissing,
+    PanelUpToDate,
+    PanelFailed,
+    PanelNotConfigured,
+    LastSync,
+    Never,
+    Settings,
 }
 
 /// Placeholders `{error}`, `{program}` and `{name}` are filled by callers with `str::replace`.
@@ -445,6 +451,16 @@ pub fn tr(language: Language, message: Message) -> &'static str {
             "The remote \"{name}\" does not exist in rclone. Create it in the Rclone accounts tab.",
             "El remoto \"{name}\" no existe en rclone. Créalo en la pestaña Cuentas de rclone.",
         ],
+        PanelUpToDate => ["Em dia", "Up to date", "Al día"],
+        PanelFailed => ["Falha", "Failed", "Error"],
+        PanelNotConfigured => ["Não configurado", "Not configured", "No configurado"],
+        LastSync => [
+            "Último sync: {time}",
+            "Last sync: {time}",
+            "Última sincronización: {time}",
+        ],
+        Never => ["nunca", "never", "nunca"],
+        Settings => ["Configurações…", "Settings…", "Configuración…"],
     };
     match language {
         PtBr => pt,

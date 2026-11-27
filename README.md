@@ -7,6 +7,10 @@ pasta local também o apaga no destino na próxima sincronização.
 ## Recursos do MVP
 
 - sincronização manual pela janela ou pela bandeja;
+- painel compacto ao clicar no ícone da bandeja (estado, último sync, origem e
+  destino, **Sincronizar agora**, **Configurações…** e **Sair**); em Hyprland,
+  Sway e KDE Wayland ele aparece logo abaixo da barra superior via
+  `gtk4-layer-shell`, e nos demais ambientes como uma janela pequena;
 - intervalo automático configurável, com padrão de 10 minutos;
 - filtros de arquivos e pastas em uma interface simples;
 - configuração TOML editável em `~/.config/drivemirror/config.toml`;
@@ -68,7 +72,8 @@ na lista e podem ser removidos.
 No Omarchy/Arch, instale com `./bin/install`. Em Debian, Ubuntu ou Pop!_OS,
 gere o pacote com `./packaging/debian/build-deb` e instale o `.deb` resultante.
 Gere o `.deb` na distribuição em que ele será usado, para vinculá-lo às versões
-de GTK e glibc disponíveis naquele sistema.
+de GTK e glibc disponíveis naquele sistema. O `.deb` depende de
+`libgtk4-layer-shell0`, disponível a partir do Debian 13 e do Ubuntu 24.10.
 
 ## Segurança
 

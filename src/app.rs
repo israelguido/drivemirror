@@ -11,6 +11,7 @@ use drivemirror::{
     accounts::{RemoteProblem, remote_problem},
     default_config_path,
     i18n::{Language, Message, tr},
+    panel::PanelState,
 };
 use gtk::{gio, glib, prelude::*};
 
@@ -62,6 +63,9 @@ pub fn activate(
     // What the automatic sync last refused (config text, known and incomplete remotes):
     // it stays quiet until one of them changes instead of repeating every interval.
     let blocked = Rc::new(RefCell::new(None::<SyncBlock>));
+    // Outcome and local (hour, minute) of the latest sync, shown by the tray panel.
+    let last_success = Rc::new(Cell::new(None::<bool>));
+    let last_success_at = Rc::new(Cell::new(None::<(u32, u32)>));
     let window = gtk::ApplicationWindow::builder()
         .application(app)
         .title("DriveMirror")
@@ -239,6 +243,8 @@ pub fn activate(
         last_sync,
         #[strong]
         blocked,
+        #[strong]
+        last_success,
         move |manual| {
             *last_sync.borrow_mut() = Instant::now();
             let block: SyncBlock = (
@@ -307,6 +313,9 @@ pub fn activate(
                     ui.sync.set_sensitive(false);
                 }
                 Err(error) => {
+                    if lasting.get() {
+                        last_success.set(Some(false));
+                    }
                     if !manual && lasting.get() {
                         blocked.replace(Some(block));
                     }
@@ -321,6 +330,68 @@ pub fn activate(
         move |_| run_sync(true)
     ));
 
+    let request_quit: Rc<dyn Fn()> = Rc::new(glib::clone!(
+        #[strong]
+        ui,
+        #[strong]
+        runner,
+        #[strong]
+        app,
+        #[strong]
+        quit_requested,
+        move || {
+            if runner.is_running() {
+                quit_requested.set(true);
+                ui.status.set_text(t(&ui, Message::WaitingToQuit));
+            } else {
+                app.quit();
+            }
+        }
+    ));
+    let panel = crate::tray_panel::build(
+        &ui,
+        Rc::new(glib::clone!(
+            #[strong]
+            run_sync,
+            move || run_sync(true)
+        )),
+        Rc::new(glib::clone!(
+            #[weak]
+            window,
+            move || window.present()
+        )),
+        request_quit.clone(),
+    );
+    let refresh_panel = glib::clone!(
+        #[strong]
+        panel,
+        #[strong]
+        ui,
+        #[strong]
+        runner,
+        #[strong]
+        config,
+        #[strong]
+        last_success,
+        #[strong]
+        last_success_at,
+        move || {
+            let Ok(config) = config.lock().map(|config| config.clone()) else {
+                return;
+            };
+            let state = PanelState::new(
+                config.validate().is_ok(),
+                runner.is_running(),
+                last_success.get(),
+            );
+            panel.refresh(
+                selected_language(&ui).current(),
+                state,
+                last_success_at.get(),
+                &config,
+            );
+        }
+    );
     glib::timeout_add_local(
         Duration::from_millis(400),
         glib::clone!(
@@ -340,21 +411,32 @@ pub fn activate(
             app,
             #[strong]
             quit_requested,
+            #[strong]
+            last_success,
+            #[strong]
+            last_success_at,
             move || {
                 while let Ok(action) = receiver.lock().expect("tray receiver").try_recv() {
                     match action {
                         Action::Show => window.present(),
-                        Action::Sync => run_sync(true),
-                        Action::Quit if runner.is_running() => {
-                            quit_requested.set(true);
-                            ui.status.set_text(t(&ui, Message::WaitingToQuit));
+                        Action::TogglePanel => {
+                            if panel.toggle() {
+                                refresh_panel();
+                            }
                         }
-                        Action::Quit => app.quit(),
+                        Action::Sync => run_sync(true),
+                        Action::Quit => request_quit(),
                     }
                 }
                 if !runner.is_running() && !ui.sync.is_sensitive() {
                     ui.sync.set_sensitive(true);
                     if let Some(result) = runner.last_result() {
+                        last_success.set(Some(result.success));
+                        if result.success
+                            && let Ok(now) = glib::DateTime::now_local()
+                        {
+                            last_success_at.set(Some((now.hour() as u32, now.minute() as u32)));
+                        }
                         let message = if result.success {
                             if result.message.is_empty() {
                                 t(&ui, Message::SyncDone).into()
@@ -378,6 +460,9 @@ pub fn activate(
                         >= Duration::from_secs(minutes.saturating_mul(60))
                 {
                     run_sync(false);
+                }
+                if panel.is_visible() {
+                    refresh_panel();
                 }
                 glib::ControlFlow::Continue
             }

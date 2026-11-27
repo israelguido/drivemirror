@@ -2,6 +2,7 @@ mod accounts_page;
 mod app;
 mod theme;
 mod tray;
+mod tray_panel;
 
 use drivemirror::{Config, default_config_path};
 use gtk::prelude::*;
