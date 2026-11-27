@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    # Arch ships current gtk4 and gtk4-layer-shell; the Ubuntu runner does not.
+    container: archlinux:latest
+    steps:
+      - name: Install toolchain and libraries
+        run: pacman -Syu --noconfirm --needed base-devel rust gtk4 gtk4-layer-shell rclone
+      - uses: actions/checkout@v4
+      - uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-arch-${{ hashFiles('Cargo.lock') }}
+          restore-keys: cargo-arch-
+      - name: Format
+        run: cargo fmt --check
+      - name: Clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+      - name: Test
+        run: ./bin/test
+
+  checksums:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify release checksums
+        run: cd releases && sha256sum -c SHA256SUMS
