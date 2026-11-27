@@ -17,7 +17,7 @@ jobs:
     steps:
       - name: Install toolchain and libraries
         run: pacman -Syu --noconfirm --needed base-devel rust gtk4 gtk4-layer-shell rclone
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/cache@v4
         with:
           path: |
@@ -36,6 +36,6 @@ jobs:
   checksums:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Verify release checksums
         run: cd releases && sha256sum -c SHA256SUMS
