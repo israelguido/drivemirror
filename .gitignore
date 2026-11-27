@@ -1,0 +1,7 @@
+/target/
+/.superpowers/
+*.pkg.tar.*
+*.deb
+pkg/
+src/pkg/
+
