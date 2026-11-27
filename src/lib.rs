@@ -1,3 +1,4 @@
+pub mod accounts;
 mod config;
 pub mod i18n;
 mod sync;
